@@ -1,0 +1,41 @@
+﻿- id: fizzbuzz
+  input: |
+    Write a Python function fizzbuzz(n) that returns a list of strings from 1 to n.
+    For multiples of 3, use "Fizz"; for multiples of 5, use "Buzz"; for multiples of
+    both, use "FizzBuzz"; otherwise the number as a string.
+  expected: |
+    A function fizzbuzz(n) returning a list of length n. fizzbuzz(15) must equal
+    ["1","2","Fizz","4","Buzz","Fizz","7","8","Fizz","Buzz","11","Fizz","13","14","FizzBuzz"].
+  test_code: |
+    assert callable(fizzbuzz)
+    expected = ["1","2","Fizz","4","Buzz","Fizz","7","8","Fizz","Buzz","11","Fizz","13","14","FizzBuzz"]
+    assert fizzbuzz(15) == expected
+    assert fizzbuzz(1) == ["1"]
+
+- id: reverse_words
+  input: |
+    Write a Python function reverse_words(s) that reverses the order of words in a
+    whitespace-separated string. Preserve single-space separation in the output.
+  expected: |
+    reverse_words("hello world foo") must return "foo world hello".
+    reverse_words("") must return "".
+    reverse_words("one") must return "one".
+  test_code: |
+    assert callable(reverse_words)
+    assert reverse_words("hello world foo") == "foo world hello"
+    assert reverse_words("") == ""
+    assert reverse_words("one") == "one"
+
+- id: is_palindrome
+  input: |
+    Write a Python function is_palindrome(s) that returns True iff s reads the same
+    forwards and backwards, ignoring case and non-alphanumeric characters.
+  expected: |
+    is_palindrome("A man, a plan, a canal: Panama") must return True.
+    is_palindrome("hello") must return False.
+    is_palindrome("") must return True.
+  test_code: |
+    assert callable(is_palindrome)
+    assert is_palindrome("A man, a plan, a canal: Panama") is True
+    assert is_palindrome("hello") is False
+    assert is_palindrome("") is True

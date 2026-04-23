@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version)",
+      "Bash(pip install *)",
+      "Bash(python -m pytest backend/tests/ -x --tb=short)",
+      "Bash(python -m pytest backend/tests/ --tb=short)",
+      "Bash(python -m pytest backend/tests/test_runtime.py::test_max_iterations_halts_cleanly -s --tb=long)",
+      "Bash(python -c ' *)",
+      "Bash(python -m backend.cli.main --help)",
+      "Bash(python -m backend.cli.main export-mermaid coder_tester)",
+      "Bash(python -m pytest backend/tests -q)"
+    ]
+  }
+}

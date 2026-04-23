@@ -1,0 +1,18 @@
+- id: refund_policy
+  input: |
+    What is the refund window for Nimbus Cloud subscriptions?
+  expected: |
+    30 days
+
+- id: support_schedule
+  input: |
+    When is support available for Nimbus Cloud?
+  expected: |
+    Monday to Friday from 09:00 to 17:00 AEST
+
+- id: api_limit
+  input: |
+    What's the default public API rate limit per key?
+  expected: |
+    120 requests per minute
+

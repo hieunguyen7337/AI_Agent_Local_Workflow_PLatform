@@ -1,0 +1,12 @@
+- id: refund_window
+  text: "Nimbus Cloud subscriptions can be refunded within 30 days of purchase."
+
+- id: support_hours
+  text: "Support operates Monday to Friday from 09:00 to 17:00 AEST."
+
+- id: api_rate_limit
+  text: "Public API default limit is 120 requests per minute per API key."
+
+- id: data_retention
+  text: "Audit logs are retained for 90 days on the standard plan."
+

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "workflow": "coder_tester",
+  "n_per_fixture": 4,
+  "overall": {
+    "total_runs": 12,
+    "passes": 10,
+    "pass_rate": 0.8333333333333334,
+    "mean_cost_usd": 0.015396862499999999,
+    "mean_latency_ms": 153245.28654166666,
+    "p95_latency_ms": 492585.7917,
+    "cost_stdev_usd": 0.0283452916146442,
+    "latency_stdev_ms": 257541.1264517368
+  },
+  "per_fixture": {
+    "fizzbuzz": {
+      "total_runs": 4,
+      "passes": 4,
+      "pass_rate": 1.0,
+      "mean_cost_usd": 0.0018628499999999999,
+      "mean_latency_ms": 34141.02655,
+      "p95_latency_ms": 38157.2656,
+      "cost_stdev_usd": 8.050676213834463e-05,
+      "latency_stdev_ms": 3952.718126528016
+    },
+    "reverse_words": {
+      "total_runs": 4,
+      "passes": 2,
+      "pass_rate": 0.5,
+      "mean_cost_usd": 0.041832299999999996,
+      "mean_latency_ms": 368304.31005,
+      "p95_latency_ms": 899497.9818,
+      "cost_stdev_usd": 0.03689797039296335,
+      "latency_stdev_ms": 358380.5400406387
+    },
+    "is_palindrome": {
+      "total_runs": 4,
+      "passes": 4,
+      "pass_rate": 1.0,
+      "mean_cost_usd": 0.0024954375,
+      "mean_latency_ms": 57290.523025,
+      "p95_latency_ms": 108290.6551,
+      "cost_stdev_usd": 0.0006718277321745136,
+      "latency_stdev_ms": 29774.737607928513
+    }
+  }
+}

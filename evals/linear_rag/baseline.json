@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "workflow": "linear_rag",
+  "n_per_fixture": 4,
+  "overall": {
+    "total_runs": 12,
+    "passes": 8,
+    "pass_rate": 0.6666666666666666,
+    "mean_cost_usd": 0.0005986874999999999,
+    "mean_latency_ms": 13377.621316666666,
+    "p95_latency_ms": 20260.5652,
+    "cost_stdev_usd": 0.00023357254326814616,
+    "latency_stdev_ms": 6386.433457722495
+  },
+  "per_fixture": {
+    "refund_policy": {
+      "total_runs": 4,
+      "passes": 4,
+      "pass_rate": 1.0,
+      "mean_cost_usd": 0.0005525625,
+      "mean_latency_ms": 19528.4521,
+      "p95_latency_ms": 30773.1304,
+      "cost_stdev_usd": 0.00031575560045508304,
+      "latency_stdev_ms": 7639.476163977975
+    },
+    "support_schedule": {
+      "total_runs": 4,
+      "passes": 0,
+      "pass_rate": 0.0,
+      "mean_cost_usd": 0.00046826249999999995,
+      "mean_latency_ms": 10561.65905,
+      "p95_latency_ms": 12724.5146,
+      "cost_stdev_usd": 6.19408740251543e-06,
+      "latency_stdev_ms": 1681.2814890729521
+    },
+    "api_limit": {
+      "total_runs": 4,
+      "passes": 4,
+      "pass_rate": 1.0,
+      "mean_cost_usd": 0.0007752375,
+      "mean_latency_ms": 10042.7528,
+      "p95_latency_ms": 12348.5044,
+      "cost_stdev_usd": 0.00011670618757696618,
+      "latency_stdev_ms": 2070.6478668085924
+    }
+  }
+}
