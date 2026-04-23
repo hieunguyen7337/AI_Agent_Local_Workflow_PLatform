@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 
 @dataclass
@@ -19,3 +20,6 @@ class LLMResponse:
 
 class ProviderError(RuntimeError):
     pass
+
+
+CancelCheck = Callable[[], bool]

@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from backend.builder.api import GraphMetadata
-from backend.builder.nodes import GateNodeConfig
+from backend.builder.nodes import GateNodeConfig, RouterNodeConfig
 from backend.server.node_metrics import compute_node_metrics
 
 router = APIRouter()
@@ -39,9 +39,9 @@ def _topology_dict(metadata: GraphMetadata) -> dict:
         )
     edges: list[dict] = []
     for s, t in metadata.edges:
-        # Skip edges from gate nodes — they are modeled as conditional.
+        # Skip edges from conditional nodes — they are modeled separately.
         src_cfg = metadata.nodes.get(s)
-        if isinstance(src_cfg, GateNodeConfig):
+        if isinstance(src_cfg, (GateNodeConfig, RouterNodeConfig)):
             continue
         edges.append({"source": s, "target": t, "kind": "normal"})
     for nid, cfg in metadata.nodes.items():
@@ -52,6 +52,20 @@ def _topology_dict(metadata: GraphMetadata) -> dict:
             edges.append(
                 {"source": nid, "target": cfg.fail_target, "kind": "conditional", "label": "fail"}
             )
+        if isinstance(cfg, RouterNodeConfig):
+            for label, target in cfg.routes.items():
+                edges.append(
+                    {"source": nid, "target": target, "kind": "conditional", "label": label}
+                )
+            if cfg.default_target is not None:
+                edges.append(
+                    {
+                        "source": nid,
+                        "target": cfg.default_target,
+                        "kind": "conditional",
+                        "label": "default",
+                    }
+                )
     loops = [
         {
             "loop_id": lp.loop_id,

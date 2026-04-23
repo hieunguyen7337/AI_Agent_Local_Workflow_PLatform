@@ -63,3 +63,14 @@ def test_sandbox_output_truncation():
     assert result.truncated is True
     assert len(result.stdout.encode("utf-8")) <= 200
 
+
+def test_sandbox_accepts_bom_prefixed_test_code():
+    result = run_sandbox_python(
+        candidate_code="def add(a, b):\n    return a + b\n",
+        test_code="\ufeffassert add(1, 2) == 3",
+        timeout_s=1.0,
+        max_output_bytes=4096,
+        memory_limit_mb=256,
+    )
+    assert result.verdict is True
+    assert result.status == "PASS"

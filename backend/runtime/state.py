@@ -18,6 +18,11 @@ class WorkflowState(TypedDict, total=False):
     retrieved_context: str
     reranked_context: str
     final_answer: str
+    supervisor_route: str
+    research_notes: str
+    dispatch_brief: str
+    specialist_a_notes: str
+    specialist_b_notes: str
     retrieved_doc_ids: list[str]
     _test_code: str
     tester_mode: str
@@ -40,6 +45,11 @@ def new_state(user_input: str) -> WorkflowState:
         retrieved_context="",
         reranked_context="",
         final_answer="",
+        supervisor_route="",
+        research_notes="",
+        dispatch_brief="",
+        specialist_a_notes="",
+        specialist_b_notes="",
         retrieved_doc_ids=[],
         _test_code="",
         tester_mode="",

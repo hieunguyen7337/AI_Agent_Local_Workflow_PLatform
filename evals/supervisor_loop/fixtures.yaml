@@ -1,0 +1,9 @@
+- id: audit_trail
+  input: "Explain why workflow telemetry matters in 2-3 sentences. Include the exact phrase 'audit trail'."
+  expected: "audit trail"
+- id: bounded_loop
+  input: "Describe a supervisor workflow in 2-3 sentences. Include the exact phrase 'bounded loop'."
+  expected: "bounded loop"
+- id: four_runs
+  input: "Give a short testing recommendation for this project. Include the exact phrase 'four runs'."
+  expected: "four runs"

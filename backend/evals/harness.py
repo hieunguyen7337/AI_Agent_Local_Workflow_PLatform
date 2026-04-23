@@ -9,6 +9,7 @@ from pathlib import Path
 from backend.evals.fixtures import Fixture, load_fixtures
 from backend.evals.metrics import EvalSummary, confidence_intervals, summarize
 from backend.evals.regression import build_baseline_snapshot, compare_against_baseline
+from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
 
 EVALS_ROOT = Path("evals")
@@ -23,6 +24,7 @@ def run_eval(
     output_path: Path | None = None,
     baseline_path: Path | None = None,
     update_baseline: bool = False,
+    cancellation: CancellationController | None = None,
 ) -> dict:
     module = importlib.import_module(f"backend.workflows.{workflow}")
     metadata = module.build_compiled()
@@ -38,6 +40,8 @@ def run_eval(
     for fx in fixtures:
         per_fx: list[dict] = []
         for i in range(n_per_fixture):
+            if cancellation is not None and cancellation.is_cancelled():
+                break
             initial_overrides = {"_test_code": fx.test_code} if fx.test_code else None
             result = run_graph(
                 metadata,
@@ -45,6 +49,7 @@ def run_eval(
                 expected=fx.expected,
                 runs_root=runs_root,
                 initial_state_overrides=initial_overrides,
+                cancellation=cancellation,
             )
             passed = _infer_pass(result.final_state, fx.expected, has_tester_node=has_tester_node)
             per_fx.append(
@@ -59,9 +64,17 @@ def run_eval(
                     "error": result.error,
                 }
             )
+            if result.status == "cancelled":
+                break
+        if not per_fx:
+            break
         per_fixture_summaries[fx.id] = summarize(per_fx)
         per_fixture_ci[fx.id] = _ci_dict(per_fx)
         all_results.extend(per_fx)
+        if cancellation is not None and cancellation.is_cancelled():
+            break
+        if per_fx and per_fx[-1]["status"] == "cancelled":
+            break
 
     overall = summarize(all_results)
     overall_ci = _ci_dict(all_results)
@@ -69,6 +82,9 @@ def run_eval(
         "workflow": workflow,
         "n_per_fixture": n_per_fixture,
         "fixture_count": len(fixtures),
+        "status": "cancelled" if cancellation is not None and cancellation.is_cancelled() else "ok",
+        "completed_fixture_count": len(per_fixture_summaries),
+        "completed_run_count": len(all_results),
         "overall": asdict(overall),
         "overall_ci": overall_ci,
         "per_fixture": {fid: asdict(s) for fid, s in per_fixture_summaries.items()},
@@ -78,7 +94,7 @@ def run_eval(
 
     baseline_path = baseline_path or EVALS_ROOT / workflow / "baseline.json"
     baseline_payload: dict | None = None
-    if update_baseline:
+    if update_baseline and out["status"] != "cancelled":
         baseline_payload = build_baseline_snapshot(out)
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
         with baseline_path.open("w", encoding="utf-8") as bf:
@@ -90,7 +106,15 @@ def run_eval(
         except Exception:
             baseline_payload = None
 
-    if baseline_payload is None:
+    if out["status"] == "cancelled":
+        baseline_comparison = {
+            "status": "cancelled",
+            "baseline_path": str(baseline_path),
+            "regression_detected": False,
+            "metrics": [],
+            "regressions": [],
+        }
+    elif baseline_payload is None:
         baseline_comparison = {
             "status": "no_baseline",
             "baseline_path": str(baseline_path),

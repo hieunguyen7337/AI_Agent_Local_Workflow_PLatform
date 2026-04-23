@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +18,21 @@ from backend.builder.nodes import (
     LoopConfig,
     NodeConfig,
     RetrieverNodeConfig,
+    RouterNodeConfig,
     TesterNodeConfig,
 )
-from backend.runtime.errors import BudgetExceededError, WorkflowError
+from backend.runtime.cancellation import CancellationController
+from backend.runtime.errors import (
+    BudgetExceededError,
+    BuilderValidationError,
+    CancelledError,
+    MaxIterationsError,
+    WorkflowError,
+)
 from backend.runtime.nodes.gate import make_gate_passthrough, make_gate_router
 from backend.runtime.nodes.llm import make_llm_node
 from backend.runtime.nodes.retriever import make_retriever_node
+from backend.runtime.nodes.router import make_router_dispatcher, make_router_passthrough
 from backend.runtime.nodes.tester import make_tester_node
 from backend.runtime.state import WorkflowState, new_state
 from backend.telemetry.exporter import record_run_end, record_run_start
@@ -44,28 +53,55 @@ class RunResult:
     run_id: str
     graph_name: str
     final_state: dict
-    status: str  # "ok", "budget_exceeded", "max_iterations", "error"
+    status: str  # "ok", "budget_exceeded", "max_iterations", "cancelled", "error"
     error: str | None
     cost_usd: float
     latency_ms: float
     run_dir: Path
 
 
-def _node_factory(enforcer: BudgetEnforcer, *, run_id: str, graph_name: str):
+def _node_factory(
+    enforcer: BudgetEnforcer,
+    *,
+    run_id: str,
+    graph_name: str,
+    cancellation: CancellationController | None,
+):
     def _on_cost(usd: float) -> None:
         enforcer.add_cost(usd)
 
     def _make(cfg: NodeConfig, metadata: GraphMetadata):
+        base = None
         if isinstance(cfg, LLMNodeConfig):
-            return make_llm_node(cfg, run_id=run_id, graph_name=graph_name, on_cost=_on_cost)
-        if isinstance(cfg, TesterNodeConfig):
-            return make_tester_node(cfg, run_id=run_id, graph_name=graph_name, on_cost=_on_cost)
-        if isinstance(cfg, RetrieverNodeConfig):
-            return make_retriever_node(cfg, run_id=run_id, graph_name=graph_name)
-        if isinstance(cfg, GateNodeConfig):
+            base = make_llm_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                on_cost=_on_cost,
+                cancellation=cancellation,
+            )
+        elif isinstance(cfg, TesterNodeConfig):
+            base = make_tester_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                on_cost=_on_cost,
+                cancellation=cancellation,
+            )
+        elif isinstance(cfg, RetrieverNodeConfig):
+            base = make_retriever_node(cfg, run_id=run_id, graph_name=graph_name)
+        elif isinstance(cfg, GateNodeConfig):
             loop = _find_loop(metadata, cfg.fail_target)
             return make_gate_passthrough(cfg, loop, run_id=run_id, graph_name=graph_name)
-        raise TypeError(f"Unknown node kind: {type(cfg).__name__}")
+        elif isinstance(cfg, RouterNodeConfig):
+            return make_router_passthrough(cfg, run_id=run_id, graph_name=graph_name)
+        else:
+            raise TypeError(f"Unknown node kind: {type(cfg).__name__}")
+
+        loop = _find_loop_from_source(metadata, cfg.id)
+        if loop is not None:
+            return _wrap_with_loop_counter(base, loop)
+        return base
 
     return _make
 
@@ -82,11 +118,40 @@ def _gate_router_factory(run_id: str, graph_name: str):
     return _make
 
 
+def _router_dispatch_factory():
+    def _make(cfg: RouterNodeConfig):
+        return make_router_dispatcher(cfg)
+
+    return _make
+
+
 def _find_loop(metadata: GraphMetadata, fail_target: str) -> LoopConfig | None:
     for lp in metadata.loops:
         if lp.back_edge_to == fail_target:
             return lp
     return None
+
+
+def _find_loop_from_source(metadata: GraphMetadata, source: str) -> LoopConfig | None:
+    for lp in metadata.loops:
+        if lp.back_edge_from == source:
+            return lp
+    return None
+
+
+def _wrap_with_loop_counter(base_node, loop: LoopConfig):
+    def _node(state: WorkflowState) -> dict:
+        update = dict(base_node(state) or {})
+        counts = dict(state.get("iteration_counts", {}))
+        next_count = counts.get(loop.loop_id, 0) + 1
+        if next_count > loop.max_iterations:
+            raise MaxIterationsError(loop.loop_id, loop.max_iterations)
+        counts[loop.loop_id] = next_count
+        update["iteration_counts"] = counts
+        return update
+
+    _node.__name__ = getattr(base_node, "__name__", "loop_wrapped_node")
+    return _node
 
 
 def run_graph(
@@ -99,6 +164,8 @@ def run_graph(
     thread_id: str | None = None,
     initial_state_overrides: dict[str, Any] | None = None,
     recursion_limit: int = 50,
+    start_at_node: str | None = None,
+    cancellation: CancellationController | None = None,
 ) -> RunResult:
     run_id = run_id or f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     run_dir = runs_root / run_id
@@ -120,10 +187,21 @@ def run_graph(
         started_ns=started_ns,
     )
 
+    if start_at_node is not None:
+        if start_at_node not in metadata.node_ids():
+            raise BuilderValidationError(f"start_at_node {start_at_node!r} not in workflow")
+        metadata = replace(metadata, entry=start_at_node)
+
     compiled_sg = compile_to_langgraph(
         metadata,
-        node_factory=_node_factory(enforcer, run_id=run_id, graph_name=metadata.name),
+        node_factory=_node_factory(
+            enforcer,
+            run_id=run_id,
+            graph_name=metadata.name,
+            cancellation=cancellation,
+        ),
         gate_router_factory=_gate_router_factory(run_id, metadata.name),
+        router_dispatch_factory=_router_dispatch_factory(),
     )
 
     checkpoint_path = run_dir / "checkpoints.db"
@@ -153,10 +231,14 @@ def run_graph(
                 # Budget enforcement is an intentional node-boundary check: after each
                 # completed step update, before the next node is dispatched.
                 last_state = final_state
+                if cancellation is not None:
+                    cancellation.raise_if_cancelled()
                 for chunk in app.stream(state, config=config):
                     for _node_id, update in chunk.items():
                         if isinstance(update, dict):
                             last_state.update(update)
+                    if cancellation is not None:
+                        cancellation.raise_if_cancelled()
                     try:
                         enforcer.check()
                     except BudgetExceededError as be:
@@ -172,6 +254,10 @@ def run_graph(
                 except Exception:
                     pass
                 final_state = last_state
+            except CancelledError as ce:
+                status = "cancelled"
+                error = str(ce)
+                span.set_attribute(WORKFLOW_STATUS, status)
             except BudgetExceededError:
                 pass
             except WorkflowError as we:

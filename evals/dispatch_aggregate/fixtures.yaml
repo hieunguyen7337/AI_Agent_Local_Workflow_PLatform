@@ -1,0 +1,9 @@
+- id: local_first
+  input: "Explain why local-first workflow tools matter in 2-3 sentences. Include the exact phrase 'fast feedback and audit trail'."
+  expected: "fast feedback and audit trail"
+- id: review_quality
+  input: "Explain why review workflows need both investigation and synthesis. Include the exact phrase 'root cause and final recommendation'."
+  expected: "root cause and final recommendation"
+- id: eval_discipline
+  input: "Give a short recommendation for running workflow evals. Include the exact phrase 'four runs and stable prompts'."
+  expected: "four runs and stable prompts"

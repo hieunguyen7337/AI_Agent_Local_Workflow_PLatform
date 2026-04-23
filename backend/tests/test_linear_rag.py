@@ -70,7 +70,7 @@ def test_linear_rag_runtime_and_eval(monkeypatch, tmp_path: Path):
             return LLMResponse(text="The refund window is 30 days.", usage=Usage(1, 1), model="m")
         return LLMResponse(text="refund window nimbus cloud", usage=Usage(1, 1), model="m")
 
-    monkeypatch.setattr(oai, "call_openai", _reply)
+    monkeypatch.setattr(oai, "stream_openai", _reply)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
     metadata = linear_rag.build_compiled()

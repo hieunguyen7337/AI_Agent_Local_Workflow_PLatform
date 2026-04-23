@@ -1,18 +1,13 @@
 ﻿# Future Scope
 
-This file tracks everything deliberately deferred beyond M2.4. It is the single source of truth for "we decided not to do this yet, and here's why." Entries should be pruned as they graduate into real milestones.
+This file tracks everything deliberately deferred beyond M3.2. It is the single source of truth for "we decided not to do this yet, and here's why." Entries should be pruned as they graduate into real milestones.
 
 ## Explicitly deferred
 
 ### M2 - second workflow pattern + ergonomics
 
-- **Schema-evolution-safe replay** - allow replay when state schema has changed between run and replay.
-- **Streaming cancel** - cooperative cancellation during streaming LLM responses.
-
 ### M3 - remaining workflow patterns + schema decision
 
-- **Supervisor loop pattern** - orchestrator chooses specialist per turn, loops until FINISH.
-- **Dispatch-and-aggregate pattern** - boss fans out to parallel specialists, aggregator produces final verdict.
 - **Decision point - canonical `GraphSpec`?** After four workflow patterns exist, evaluate whether the builder's internal form is straining against LangGraph's native representation. If yes, introduce explicit Pydantic `GraphSpec` / `NodeSpec` / `EdgeSpec` layer. Write the decision down either way.
 - **JSON graph import/export** - only if `GraphSpec` is introduced. Required for M5.
 

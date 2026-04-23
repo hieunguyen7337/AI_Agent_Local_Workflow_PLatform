@@ -51,3 +51,26 @@ def test_run_passes_test_code_file_and_prints_tester_mode(monkeypatch, tmp_path:
     payload = json.loads(result.stdout)
     assert payload["tester_mode"] == "sandbox"
 
+
+def test_run_cancelled_exits_130(monkeypatch):
+    def _fake_load(workflow: str):
+        return object()
+
+    def _fake_run_graph(metadata, **kwargs):
+        return RunResult(
+            run_id="r1",
+            graph_name="g",
+            final_state={"tester_verdict": False, "tester_mode": "llm_judge"},
+            status="cancelled",
+            error="user_cancelled",
+            cost_usd=0.0,
+            latency_ms=1.0,
+            run_dir=Path("runs") / "r1",
+        )
+
+    monkeypatch.setattr(cli_main, "_load_workflow_metadata", _fake_load)
+    monkeypatch.setattr(cli_main, "run_graph", _fake_run_graph)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main.app, ["run", "coder_tester", "--input", "write add"])
+    assert result.exit_code == 130

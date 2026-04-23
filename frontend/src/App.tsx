@@ -6,7 +6,7 @@ import RunDetail from "./components/RunDetail";
 import { fetchNodeMetrics, fetchTopology } from "./api/client";
 import { useLiveUpdates } from "./live/useLiveUpdates";
 
-const WORKFLOWS = ["coder_tester", "linear_rag"] as const;
+const WORKFLOWS = ["coder_tester", "linear_rag", "supervisor_loop", "dispatch_aggregate"] as const;
 
 export default function App() {
   const [workflow, setWorkflow] = useState<(typeof WORKFLOWS)[number]>("coder_tester");

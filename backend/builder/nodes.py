@@ -72,6 +72,15 @@ class GateNodeConfig(NodeConfig):
     fail_target: str  # node id
 
 
+class RouterNodeConfig(NodeConfig):
+    """Multi-way router that dispatches on a state token."""
+
+    kind: Literal["router"] = "router"
+    route_state_key: str
+    routes: dict[str, str]
+    default_target: str | None = None
+
+
 class LoopConfig(BaseModel):
     """Attached to a back-edge. M1 design rule: every loop has max_iterations."""
 

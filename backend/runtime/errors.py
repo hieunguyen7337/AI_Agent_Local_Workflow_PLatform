@@ -25,3 +25,15 @@ class MaxIterationsError(WorkflowError):
 
 class BuilderValidationError(WorkflowError):
     pass
+
+
+class ReplayError(WorkflowError):
+    pass
+
+
+class CancelledError(WorkflowError):
+    pass
+
+
+class RoutingError(WorkflowError):
+    pass

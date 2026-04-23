@@ -82,3 +82,31 @@ def test_get_graph_linear_rag_shape():
     assert body["name"] == "linear_rag"
     node_ids = {n["id"] for n in body["nodes"]}
     assert {"query_analyser", "retriever", "reranker", "synthesiser"} <= node_ids
+
+
+def test_get_graph_supervisor_loop_shape():
+    client = TestClient(app)
+    resp = client.get("/api/graph/supervisor_loop")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "supervisor_loop"
+    node_ids = {n["id"] for n in body["nodes"]}
+    assert {"supervisor", "dispatch", "researcher", "writer"} <= node_ids
+    labels = {(edge["source"], edge["label"], edge["target"]) for edge in body["edges"] if edge["kind"] == "conditional"}
+    assert ("dispatch", "RESEARCHER", "researcher") in labels
+    assert ("dispatch", "WRITER", "writer") in labels
+
+
+def test_get_graph_dispatch_aggregate_shape():
+    client = TestClient(app)
+    resp = client.get("/api/graph/dispatch_aggregate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "dispatch_aggregate"
+    node_ids = {n["id"] for n in body["nodes"]}
+    assert {"dispatcher", "specialist_a", "specialist_b", "aggregator"} <= node_ids
+    edges = {(edge["source"], edge["target"], edge["kind"]) for edge in body["edges"]}
+    assert ("dispatcher", "specialist_a", "normal") in edges
+    assert ("dispatcher", "specialist_b", "normal") in edges
+    assert ("specialist_a", "aggregator", "normal") in edges
+    assert ("specialist_b", "aggregator", "normal") in edges

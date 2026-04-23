@@ -94,7 +94,7 @@ def test_end_to_end_mini_eval(monkeypatch, tmp_path: Path):
             LLMResponse(text="code", usage=Usage(1, 1), model="m"),
             LLMResponse(text="PASS\nok", usage=Usage(1, 1), model="m"),
         ]
-    monkeypatch.setattr(orouter, "call_openrouter", _Replies(replies))
+    monkeypatch.setattr(orouter, "stream_openrouter", _Replies(replies))
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     out = run_eval(
@@ -123,7 +123,7 @@ def test_eval_baseline_update_and_regression(monkeypatch, tmp_path: Path):
         LLMResponse(text="code", usage=Usage(1, 1), model="m"),
         LLMResponse(text="PASS\nok", usage=Usage(1, 1), model="m"),
     ]
-    monkeypatch.setattr(orouter, "call_openrouter", _Replies(pass_replies))
+    monkeypatch.setattr(orouter, "stream_openrouter", _Replies(pass_replies))
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     first = run_eval(
         workflow="coder_tester",
@@ -145,7 +145,7 @@ def test_eval_baseline_update_and_regression(monkeypatch, tmp_path: Path):
             return LLMResponse(text="plan", usage=Usage(1, 1), model="m")
         return LLMResponse(text="code", usage=Usage(1, 1), model="m")
 
-    monkeypatch.setattr(orouter, "call_openrouter", _mostly_fail)
+    monkeypatch.setattr(orouter, "stream_openrouter", _mostly_fail)
     second = run_eval(
         workflow="coder_tester",
         n_per_fixture=1,
@@ -186,7 +186,7 @@ def test_eval_uses_sandbox_when_test_code_present(monkeypatch, tmp_path: Path):
             return LLMResponse(text="def add(a, b):\n    return a + b", usage=Usage(1, 1), model="m")
         raise AssertionError("tester should not use OpenRouter when test_code is present")
 
-    monkeypatch.setattr(orouter, "call_openrouter", _strict_replies)
+    monkeypatch.setattr(orouter, "stream_openrouter", _strict_replies)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     out = run_eval(

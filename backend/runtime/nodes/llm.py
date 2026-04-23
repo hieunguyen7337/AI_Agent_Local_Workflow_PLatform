@@ -7,12 +7,15 @@ from typing import Callable
 from opentelemetry.trace import Status, StatusCode
 
 from backend.builder.nodes import LLMNodeConfig
-from backend.providers import call_provider
+from backend.providers import stream_provider
 from backend.providers.pricing import price_for
+from backend.runtime.cancellation import CancellationController
+from backend.runtime.errors import CancelledError
 from backend.runtime.state import WorkflowState
 from backend.telemetry.genai_attrs import (
     WORKFLOW_COST_USD,
     WORKFLOW_LATENCY_MS,
+    WORKFLOW_STATUS,
     llm_request_attrs,
     llm_usage_attrs,
     node_attrs,
@@ -26,6 +29,7 @@ def make_llm_node(
     run_id: str,
     graph_name: str,
     on_cost: Callable[[float], None],
+    cancellation: CancellationController | None = None,
 ) -> Callable[[WorkflowState], dict]:
     """Return a LangGraph-compatible node function."""
     tracer = get_tracer()
@@ -56,13 +60,14 @@ def make_llm_node(
                     {"role": "system", "content": cfg.system_prompt},
                     {"role": "user", "content": user_content},
                 ]
-                resp = call_provider(
+                resp = stream_provider(
                     cfg.provider,
                     model=cfg.model,
                     messages=messages,
                     temperature=cfg.temperature,
                     max_tokens=cfg.max_tokens,
                     max_retries=cfg.max_retries,
+                    cancel_check=cancellation.is_cancelled if cancellation else None,
                 )
                 cost = price.cost_usd(resp.usage.input_tokens, resp.usage.output_tokens)
                 latency_ms = (time.monotonic_ns() - t0) / 1_000_000
@@ -81,8 +86,11 @@ def make_llm_node(
                 on_cost(cost)
                 return {
                     cfg.output_state_key: resp.text,
-                    "cost_usd_accum": state.get("cost_usd_accum", 0.0) + cost,
                 }
+            except CancelledError as e:
+                span.set_attribute(WORKFLOW_STATUS, "cancelled")
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                raise
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 raise

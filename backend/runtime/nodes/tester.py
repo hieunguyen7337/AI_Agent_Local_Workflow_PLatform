@@ -13,8 +13,10 @@ from typing import Callable
 from opentelemetry.trace import Status, StatusCode
 
 from backend.builder.nodes import TesterNodeConfig
-from backend.providers import call_provider
+from backend.providers import stream_provider
 from backend.providers.pricing import price_for
+from backend.runtime.cancellation import CancellationController
+from backend.runtime.errors import CancelledError
 from backend.runtime.state import WorkflowState
 from backend.telemetry.genai_attrs import (
     WORKFLOW_COST_USD,
@@ -45,6 +47,7 @@ def make_tester_node(
     run_id: str,
     graph_name: str,
     on_cost: Callable[[float], None],
+    cancellation: CancellationController | None = None,
 ) -> Callable[[WorkflowState], dict]:
     tracer = get_tracer()
     price = price_for(cfg.provider, cfg.model)
@@ -93,7 +96,6 @@ def make_tester_node(
                         "tester_verdict": exec_result.verdict,
                         "tester_feedback": _format_sandbox_feedback(exec_result),
                         "tester_mode": "sandbox",
-                        "cost_usd_accum": state.get("cost_usd_accum", 0.0),
                     }
 
                 # Fallback / explicit llm_judge mode.
@@ -102,7 +104,7 @@ def make_tester_node(
                     f"CANDIDATE OUTPUT:\n{candidate}\n\n"
                     "First line: PASS or FAIL. Remaining lines: short reason."
                 )
-                resp = call_provider(
+                resp = stream_provider(
                     cfg.provider,
                     model=cfg.model,
                     messages=[
@@ -111,6 +113,7 @@ def make_tester_node(
                     ],
                     temperature=cfg.temperature,
                     max_retries=cfg.max_retries,
+                    cancel_check=cancellation.is_cancelled if cancellation else None,
                 )
                 first_line = resp.text.strip().splitlines()[0].strip().upper() if resp.text.strip() else "FAIL"
                 verdict = first_line.startswith("PASS")
@@ -135,8 +138,11 @@ def make_tester_node(
                     "tester_verdict": verdict,
                     "tester_feedback": feedback,
                     "tester_mode": "llm_judge",
-                    "cost_usd_accum": state.get("cost_usd_accum", 0.0) + cost,
                 }
+            except CancelledError as e:
+                span.set_attribute(WORKFLOW_STATUS, "cancelled")
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                raise
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 raise
@@ -153,7 +159,7 @@ def run_sandbox_python(
     max_output_bytes: int,
     memory_limit_mb: int | None,
 ) -> SandboxExecutionResult:
-    wrapper = _sandbox_wrapper_source(candidate_code=candidate_code, test_code=test_code)
+    wrapper = _sandbox_wrapper_source(candidate_code=candidate_code, test_code=_normalize_test_code(test_code))
     with tempfile.TemporaryDirectory(prefix="wf_tester_") as td:
         script_path = os.path.join(td, "sandbox_runner.py")
         with open(script_path, "w", encoding="utf-8") as f:
@@ -166,6 +172,9 @@ def run_sandbox_python(
             "errors": "replace",
             "timeout": timeout_s,
         }
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        kwargs["env"] = env
         preexec_fn = _preexec_memory_limit(memory_limit_mb)
         if preexec_fn is not None:
             kwargs["preexec_fn"] = preexec_fn
@@ -256,6 +265,10 @@ def _extract_result_payload(stdout: str) -> dict | None:
                 return None
             return data if isinstance(data, dict) else None
     return None
+
+
+def _normalize_test_code(test_code: str) -> str:
+    return test_code.lstrip("\ufeff")
 
 
 def _format_sandbox_feedback(result: SandboxExecutionResult) -> str:

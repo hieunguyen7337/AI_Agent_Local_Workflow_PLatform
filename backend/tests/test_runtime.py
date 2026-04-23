@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from backend.builder.api import END, GateNodeConfig, GraphBuilder, LLMNodeConfig
 from backend.providers import openai as oai
 from backend.providers import openrouter as orouter
 from backend.providers.base import LLMResponse, Usage
+from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
 
 
@@ -58,7 +61,7 @@ def test_happy_path_passes_gate(monkeypatch, tmp_runs_root):
         LLMResponse(text="def f(): pass", usage=Usage(5, 3), model="m"),  # coder
         LLMResponse(text="PASS\ngood", usage=Usage(4, 2), model="m"),  # tester
     ]
-    monkeypatch.setattr(orouter, "call_openrouter", _Replies(replies))
+    monkeypatch.setattr(orouter, "stream_openrouter", _Replies(replies))
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     metadata = _build().compile()
@@ -77,7 +80,7 @@ def test_loop_then_pass(monkeypatch, tmp_runs_root):
         LLMResponse(text="attempt 2", usage=Usage(5, 3), model="m"),  # coder again
         LLMResponse(text="PASS\ngood", usage=Usage(4, 2), model="m"),  # tester -> pass
     ]
-    monkeypatch.setattr(orouter, "call_openrouter", _Replies(replies))
+    monkeypatch.setattr(orouter, "stream_openrouter", _Replies(replies))
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     metadata = _build().compile()
@@ -93,7 +96,7 @@ def test_max_iterations_halts_cleanly(monkeypatch, tmp_runs_root):
         LLMResponse(text="c", usage=Usage(1, 1), model="m"),
         LLMResponse(text="FAIL", usage=Usage(1, 1), model="m"),
     ] * 10
-    monkeypatch.setattr(orouter, "call_openrouter", _Replies(always_fail))
+    monkeypatch.setattr(orouter, "stream_openrouter", _Replies(always_fail))
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     metadata = _build(max_iter=1).compile()
@@ -109,7 +112,7 @@ def test_budget_exceeded_halts(monkeypatch, tmp_runs_root):
         LLMResponse(text="c", usage=Usage(1_000_000, 1_000_000), model="m"),
         LLMResponse(text="FAIL", usage=Usage(1_000_000, 1_000_000), model="m"),
     ] * 10
-    monkeypatch.setattr(orouter, "call_openrouter", _Replies(replies))
+    monkeypatch.setattr(orouter, "stream_openrouter", _Replies(replies))
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     b = GraphBuilder(name="tiny", cost_budget_usd=0.0001, latency_budget_ms=60_000)
@@ -149,7 +152,7 @@ def test_sandbox_mode_with_test_code_skips_llm_tester(monkeypatch, tmp_runs_root
             )
         raise AssertionError("tester should not call OpenRouter in sandbox mode")
 
-    monkeypatch.setattr(orouter, "call_openrouter", _reply)
+    monkeypatch.setattr(orouter, "stream_openrouter", _reply)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     metadata = _build().compile()
@@ -173,7 +176,7 @@ def test_openai_provider_runtime_sets_genai_system(monkeypatch, tmp_runs_root):
         calls.append(1)
         return LLMResponse(text="openai result", usage=Usage(2, 3), model="gpt-4o-mini")
 
-    monkeypatch.setattr(oai, "call_openai", _reply)
+    monkeypatch.setattr(oai, "stream_openai", _reply)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
     b = GraphBuilder(name="openai_graph", cost_budget_usd=1.0, latency_budget_ms=60_000)
@@ -202,3 +205,31 @@ def test_openai_provider_runtime_sets_genai_system(monkeypatch, tmp_runs_root):
         ).fetchone()[0]
     attrs = json.loads(attrs_json)
     assert attrs["gen_ai.system"] == "openai"
+
+
+def test_cancellation_during_llm_generation_marks_run_cancelled(monkeypatch, tmp_runs_root):
+    def _stream_reply(**kwargs):
+        cancel_check = kwargs["cancel_check"]
+        while not cancel_check():
+            time.sleep(0.01)
+        raise AssertionError("cancel_check should have interrupted before returning")
+
+    monkeypatch.setattr(orouter, "stream_openrouter", _stream_reply)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+
+    controller = CancellationController()
+    timer = threading.Timer(0.05, controller.cancel)
+    timer.start()
+    try:
+        result = run_graph(
+            _build().compile(),
+            user_input="write f",
+            expected="a function",
+            runs_root=tmp_runs_root,
+            cancellation=controller,
+        )
+    finally:
+        timer.cancel()
+    assert result.status == "cancelled"
+    assert result.error == "user_cancelled"
+    assert result.final_state.get("coder_output", "") == ""

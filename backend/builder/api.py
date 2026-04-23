@@ -26,6 +26,7 @@ from .nodes import (
     LoopConfig,
     NodeConfig,
     RetrieverNodeConfig,
+    RouterNodeConfig,
     TesterNodeConfig,
 )
 from .validation import assert_no_cycle, assert_node_exists
@@ -65,6 +66,15 @@ class GraphMetadata:
                         continue
                     dst = "END" if target == END else target
                     lines.append(f"    {nid} -->|{label}| {dst}")
+            if isinstance(cfg, RouterNodeConfig):
+                for label, target in cfg.routes.items():
+                    if (nid, target) in loop_pairs:
+                        continue
+                    dst = "END" if target == END else target
+                    lines.append(f"    {nid} -->|{label}| {dst}")
+                if cfg.default_target is not None and (nid, cfg.default_target) not in loop_pairs:
+                    dst = "END" if cfg.default_target == END else cfg.default_target
+                    lines.append(f"    {nid} -->|default| {dst}")
         for lp in self.loops:
             lines.append(f"    {lp.back_edge_from} -. loop (max {lp.max_iterations}) .-> {lp.back_edge_to}")
         return "\n".join(lines)
@@ -125,7 +135,8 @@ class GraphBuilder:
             )
         if self._entry is None:
             raise BuilderValidationError("GraphBuilder requires an entry node (set_entry)")
-        self._validate_gates()
+        self._validate_conditionals()
+        self._validate_loops()
         return GraphMetadata(
             name=self.name,
             cost_budget_usd=self.cost_budget_usd,
@@ -136,7 +147,7 @@ class GraphBuilder:
             entry=self._entry,
         )
 
-    def _validate_gates(self) -> None:
+    def _validate_conditionals(self) -> None:
         node_ids = set(self._nodes.keys())
         for cfg in self._nodes.values():
             if isinstance(cfg, GateNodeConfig):
@@ -148,6 +159,37 @@ class GraphBuilder:
                     raise BuilderValidationError(
                         f"gate {cfg.id!r} fail_target {cfg.fail_target!r} does not exist"
                     )
+            if isinstance(cfg, RouterNodeConfig):
+                if not cfg.routes:
+                    raise BuilderValidationError(f"router {cfg.id!r} requires at least one route")
+                for label, target in cfg.routes.items():
+                    if target != END and target not in node_ids:
+                        raise BuilderValidationError(
+                            f"router {cfg.id!r} route {label!r} target {target!r} does not exist"
+                        )
+                if cfg.default_target is not None and cfg.default_target != END and cfg.default_target not in node_ids:
+                    raise BuilderValidationError(
+                        f"router {cfg.id!r} default_target {cfg.default_target!r} does not exist"
+                    )
+
+    def _validate_loops(self) -> None:
+        loop_sources: dict[str, list[LoopConfig]] = {}
+        for loop in self._loops:
+            loop_sources.setdefault(loop.back_edge_from, []).append(loop)
+
+        for source, loops in loop_sources.items():
+            cfg = self._nodes[source]
+            if isinstance(cfg, (GateNodeConfig, RouterNodeConfig)):
+                continue
+            if len(loops) > 1:
+                raise BuilderValidationError(
+                    f"node {source!r} has multiple loop back-edges; only one is supported"
+                )
+            forward_edges = [edge for edge in self._edges if edge[0] == source]
+            if forward_edges:
+                raise BuilderValidationError(
+                    f"node {source!r} cannot have both regular outgoing edges and a loop back-edge"
+                )
 
 
 __all__ = [
@@ -158,5 +200,6 @@ __all__ = [
     "RetrieverNodeConfig",
     "TesterNodeConfig",
     "GateNodeConfig",
+    "RouterNodeConfig",
     "LoopConfig",
 ]
