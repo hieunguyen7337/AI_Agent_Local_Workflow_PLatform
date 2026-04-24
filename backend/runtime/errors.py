@@ -35,5 +35,12 @@ class CancelledError(WorkflowError):
     pass
 
 
+class PendingApprovalError(WorkflowError):
+    def __init__(self, approval: dict, state_update: dict | None = None):
+        super().__init__(f"pending approval at node {approval.get('node_id')!r}")
+        self.approval = approval
+        self.state_update = state_update or {}
+
+
 class RoutingError(WorkflowError):
     pass

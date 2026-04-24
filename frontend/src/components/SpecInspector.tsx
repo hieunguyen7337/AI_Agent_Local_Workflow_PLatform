@@ -1,6 +1,13 @@
-import { useState } from "react";
-import { proposeSpecMutation } from "../api/client";
-import type { GraphNode, MutationProposalResponse, Topology, WorkflowSpecResponse } from "../types";
+import { useEffect, useState } from "react";
+import { applySpecProposal, evaluateSpecProposal, proposeSpecMutation } from "../api/client";
+import type {
+  ApplyProposalResponse,
+  GraphNode,
+  MutationProposalResponse,
+  ProposalEvaluationResponse,
+  Topology,
+  WorkflowSpecResponse,
+} from "../types";
 
 type InspectorTab = "node" | "source" | "validation" | "propose";
 
@@ -55,6 +62,15 @@ function nodeFields(node: GraphNode): Array<{ label: string; value: unknown; mon
       { label: "Route State Key", value: m.route_state_key, mono: true },
       { label: "Routes", value: m.routes, mono: true, pre: true },
       { label: "Default Target", value: m.default_target, mono: true },
+    ];
+  }
+  if (node.kind === "approval") {
+    return [
+      ...base,
+      { label: "Prompt", value: m.prompt, pre: true },
+      { label: "Approval State Key", value: m.approval_state_key, mono: true },
+      { label: "Approved Target", value: m.approved_target, mono: true },
+      { label: "Rejected Target", value: m.rejected_target, mono: true },
     ];
   }
   if (node.kind === "gate") {
@@ -120,12 +136,14 @@ export default function SpecInspector({
   selectedNodeId,
   tab,
   onTabChange,
+  onApplied,
 }: {
   topology?: Topology;
   spec?: WorkflowSpecResponse;
   selectedNodeId?: string;
   tab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
+  onApplied?: () => void | Promise<void>;
 }) {
   const selectedNode =
     topology?.nodes.find((node) => node.id === selectedNodeId) ??
@@ -137,12 +155,36 @@ export default function SpecInspector({
   const [proposal, setProposal] = useState<MutationProposalResponse | undefined>(undefined);
   const [proposalError, setProposalError] = useState<string | undefined>(undefined);
   const [isProposing, setIsProposing] = useState(false);
+  const [evaluation, setEvaluation] = useState<ProposalEvaluationResponse | undefined>(undefined);
+  const [evaluationError, setEvaluationError] = useState<string | undefined>(undefined);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [evalRunsPerFixture, setEvalRunsPerFixture] = useState(1);
+  const [evalCostCap, setEvalCostCap] = useState(2);
+  const [applyConfirmed, setApplyConfirmed] = useState(false);
+  const [applyResult, setApplyResult] = useState<ApplyProposalResponse | undefined>(undefined);
+  const [applyError, setApplyError] = useState<string | undefined>(undefined);
+  const [isApplying, setIsApplying] = useState(false);
+
+  useEffect(() => {
+    setProposal(undefined);
+    setProposalError(undefined);
+    setEvaluation(undefined);
+    setEvaluationError(undefined);
+    setApplyConfirmed(false);
+    setApplyResult(undefined);
+    setApplyError(undefined);
+  }, [spec?.workflow]);
 
   async function submitProposal() {
     if (!spec || !goal.trim()) return;
     setIsProposing(true);
     setProposal(undefined);
     setProposalError(undefined);
+    setEvaluation(undefined);
+    setEvaluationError(undefined);
+    setApplyConfirmed(false);
+    setApplyResult(undefined);
+    setApplyError(undefined);
     try {
       const result = await proposeSpecMutation(spec.workflow, {
         goal,
@@ -154,6 +196,46 @@ export default function SpecInspector({
       setProposalError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsProposing(false);
+    }
+  }
+
+  async function submitEvaluation() {
+    if (!spec || !proposal || proposal.status !== "valid") return;
+    setIsEvaluating(true);
+    setEvaluation(undefined);
+    setEvaluationError(undefined);
+    try {
+      const result = await evaluateSpecProposal(spec.workflow, {
+        proposed_yaml: proposal.proposed_yaml,
+        n_per_fixture: evalRunsPerFixture,
+        max_cost_usd: evalCostCap,
+      });
+      setEvaluation(result);
+    } catch (error) {
+      setEvaluationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsEvaluating(false);
+    }
+  }
+
+  async function submitApply() {
+    if (!spec || !proposal || proposal.status !== "valid" || !applyConfirmed) return;
+    setIsApplying(true);
+    setApplyResult(undefined);
+    setApplyError(undefined);
+    try {
+      const result = await applySpecProposal(spec.workflow, {
+        proposed_yaml: proposal.proposed_yaml,
+        proposal_summary: proposal.summary,
+        evaluation_artifact: evaluation?.run_artifact ?? null,
+        accepted_by: "local-user",
+      });
+      setApplyResult(result);
+      await onApplied?.();
+    } catch (error) {
+      setApplyError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsApplying(false);
     }
   }
 
@@ -207,7 +289,7 @@ export default function SpecInspector({
         {tab === "propose" && (
           <div className="space-y-3 text-sm">
             <div className="rounded border border-amber-200 bg-amber-50 p-3 text-amber-900">
-              Proposals are read-only. They validate and diff YAML but never modify workflow files.
+              Proposals validate and diff YAML first. Applying a valid proposal writes the canonical workflow file and creates a rollback snapshot.
             </div>
             <div className="space-y-1">
               <label className="text-[11px] uppercase tracking-wide text-slate-500">Mutation Goal</label>
@@ -254,6 +336,116 @@ export default function SpecInspector({
                 </div>
                 {proposal.validation_errors.length > 0 && (
                   <Field label="Validation Errors" value={proposal.validation_errors} mono pre />
+                )}
+                {proposal.status === "valid" && (
+                  <>
+                    <div className="space-y-3 rounded border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs font-medium text-slate-800">Evaluate proposal</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="space-y-1">
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500">Runs / Fixture</div>
+                          <input
+                            className="w-full rounded border border-slate-300 p-1.5 text-xs"
+                            type="number"
+                            min={1}
+                            max={8}
+                            value={evalRunsPerFixture}
+                            onChange={(event) => setEvalRunsPerFixture(Number(event.target.value))}
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500">Cost Cap USD</div>
+                          <input
+                            className="w-full rounded border border-slate-300 p-1.5 text-xs"
+                            type="number"
+                            min={0.01}
+                            step={0.01}
+                            value={evalCostCap}
+                            onChange={(event) => setEvalCostCap(Number(event.target.value))}
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                        disabled={isEvaluating}
+                        onClick={submitEvaluation}
+                      >
+                        {isEvaluating ? "Evaluating..." : "Evaluate proposal"}
+                      </button>
+                      {evaluationError && (
+                        <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                          {evaluationError}
+                        </div>
+                      )}
+                      {evaluation && (
+                        <div className="space-y-2">
+                          <div
+                            className={[
+                              "rounded border p-3 text-xs",
+                              evaluation.status === "ok"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                                : "border-amber-200 bg-amber-50 text-amber-900",
+                            ].join(" ")}
+                          >
+                            <div className="font-medium">Eval status: {evaluation.status}</div>
+                            {evaluation.eval && (
+                              <div>
+                                Runs: {evaluation.eval.completed_run_count} | Pass rate:{" "}
+                                {(evaluation.eval.overall.pass_rate * 100).toFixed(1)}% | Mean cost: $
+                                {evaluation.eval.overall.mean_cost_usd.toFixed(4)} | Mean latency:{" "}
+                                {evaluation.eval.overall.mean_latency_ms.toFixed(0)}ms
+                              </div>
+                            )}
+                          </div>
+                          {evaluation.validation_errors.length > 0 && (
+                            <Field label="Eval Validation Errors" value={evaluation.validation_errors} mono pre />
+                          )}
+                          <Field label="Baseline Comparison" value={evaluation.eval?.baseline_comparison ?? {}} mono pre />
+                          <Field label="Run Artifact" value={evaluation.run_artifact ?? "-"} mono />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-3 rounded border border-slate-200 bg-white p-3">
+                      <div className="text-xs font-medium text-slate-800">Apply proposal</div>
+                      {evaluation?.eval && (
+                        <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+                          Eval evidence: {evaluation.eval.completed_run_count} runs,{" "}
+                          {(evaluation.eval.overall.pass_rate * 100).toFixed(1)}% pass rate, $
+                          {evaluation.eval.overall.mean_cost_usd.toFixed(4)} mean cost.
+                        </div>
+                      )}
+                      <label className="flex items-start gap-2 text-xs text-slate-700">
+                        <input
+                          className="mt-0.5"
+                          type="checkbox"
+                          checked={applyConfirmed}
+                          onChange={(event) => setApplyConfirmed(event.target.checked)}
+                        />
+                        <span>I reviewed the diff and want to write this YAML to the canonical workflow file.</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="rounded border border-slate-300 bg-slate-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                        disabled={!applyConfirmed || isApplying}
+                        onClick={submitApply}
+                      >
+                        {isApplying ? "Applying..." : "Apply proposal"}
+                      </button>
+                      {applyError && (
+                        <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                          {applyError}
+                        </div>
+                      )}
+                      {applyResult && (
+                        <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                          <div className="font-medium">Applied to {applyResult.source_path}</div>
+                          <Field label="Audit Path" value={applyResult.audit_path} mono />
+                          <Field label="Rollback Snapshot" value={applyResult.rollback_path} mono />
+                        </div>
+                      )}
+                    </div>
+                  </>
                 )}
                 <Field label="Diff" value={proposal.diff || "No changes proposed."} mono pre />
                 <Field label="Proposed YAML" value={proposal.proposed_yaml} mono pre />

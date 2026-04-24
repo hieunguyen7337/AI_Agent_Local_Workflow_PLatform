@@ -12,10 +12,15 @@ from .loader import (
     load_graph_spec_source,
     load_workflow_metadata,
 )
+from backend.builder.nodes import ApprovalNodeConfig
+
 from .models import BudgetSpec, EdgeSpec, GraphSpec, LoopSpec
+from .apply import AppliedProposal, apply_graph_spec_proposal
 from .mutation import MutationProposal, propose_mutation
 
 __all__ = [
+    "AppliedProposal",
+    "ApprovalNodeConfig",
     "BudgetSpec",
     "EdgeSpec",
     "GraphSpec",
@@ -27,5 +32,6 @@ __all__ = [
     "load_graph_spec",
     "load_graph_spec_source",
     "load_workflow_metadata",
+    "apply_graph_spec_proposal",
     "propose_mutation",
 ]

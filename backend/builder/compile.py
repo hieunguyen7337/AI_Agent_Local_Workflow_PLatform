@@ -10,7 +10,7 @@ from backend.runtime.state import WorkflowState
 
 from .api import END as BUILDER_END
 from .api import GraphMetadata
-from .nodes import GateNodeConfig, LoopConfig, RouterNodeConfig
+from .nodes import ApprovalNodeConfig, GateNodeConfig, LoopConfig, RouterNodeConfig
 
 
 def _map_end(node_id: str) -> str:
@@ -31,6 +31,7 @@ def compile_to_langgraph(
     node_factory: Callable[..., Callable[[WorkflowState], WorkflowState]],
     gate_router_factory: Callable[[GateNodeConfig, LoopConfig | None], Callable[[WorkflowState], str]],
     router_dispatch_factory: Callable[[RouterNodeConfig], Callable[[WorkflowState], str]],
+    approval_dispatch_factory: Callable[[ApprovalNodeConfig], Callable[[WorkflowState], str]],
 ):
     """Build a LangGraph StateGraph."""
     g = StateGraph(WorkflowState)
@@ -41,7 +42,9 @@ def compile_to_langgraph(
     g.set_entry_point(metadata.entry)
 
     conditional_ids = {
-        nid for nid, cfg in metadata.nodes.items() if isinstance(cfg, (GateNodeConfig, RouterNodeConfig))
+        nid
+        for nid, cfg in metadata.nodes.items()
+        if isinstance(cfg, (ApprovalNodeConfig, GateNodeConfig, RouterNodeConfig))
     }
     for source, target in metadata.edges:
         if source in conditional_ids:
@@ -72,5 +75,15 @@ def compile_to_langgraph(
             if cfg.default_target is not None:
                 route_map[_map_end(cfg.default_target)] = _map_end(cfg.default_target)
             g.add_conditional_edges(nid, dispatcher, route_map)
+        elif isinstance(cfg, ApprovalNodeConfig):
+            dispatcher = approval_dispatch_factory(cfg)
+            g.add_conditional_edges(
+                nid,
+                dispatcher,
+                {
+                    _map_end(cfg.approved_target): _map_end(cfg.approved_target),
+                    _map_end(cfg.rejected_target): _map_end(cfg.rejected_target),
+                },
+            )
 
     return g

@@ -129,6 +129,13 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
       metadata.routes ? `routes: ${Object.keys(metadata.routes as Record<string, unknown>).join(", ")}` : "",
     ].filter(Boolean);
   }
+  if (kind === "approval") {
+    return [
+      metadata.approval_state_key ? `state: ${String(metadata.approval_state_key)}` : "",
+      metadata.approved_target ? `approve: ${String(metadata.approved_target)}` : "",
+      metadata.rejected_target ? `reject: ${String(metadata.rejected_target)}` : "",
+    ].filter(Boolean);
+  }
   return [];
 }
 

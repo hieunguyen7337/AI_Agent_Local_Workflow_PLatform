@@ -1,0 +1,44 @@
+schema_version: workflow.graph/v1
+name: approval_review
+description: Draft answer, pause for human approval, then finalize.
+budget:
+  cost_usd: 0.25
+  latency_ms: 120000
+entry: draft
+nodes:
+  - id: draft
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      Draft a concise answer for human review.
+    user_prompt_template: |-
+      Task:
+      {user_input}
+    output_state_key: draft_answer
+    temperature: 0.2
+  - id: human_review
+    kind: approval
+    prompt: Review the draft answer before finalization.
+    approval_state_key: approval_decision
+    approved_target: finalizer
+    rejected_target: __end__
+  - id: finalizer
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      Finalize the approved draft. Return only the final answer.
+    user_prompt_template: |-
+      Original task:
+      {user_input}
+
+      Approved draft:
+      {draft_answer}
+    output_state_key: final_answer
+    temperature: 0.2
+edges:
+  - from: draft
+    to: human_review
+  - from: finalizer
+    to: __end__

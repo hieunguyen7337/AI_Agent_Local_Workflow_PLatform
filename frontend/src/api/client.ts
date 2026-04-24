@@ -1,7 +1,12 @@
 import type {
+  ApplyProposalRequest,
+  ApplyProposalResponse,
+  ApprovalSummary,
   MutationProposalRequest,
   MutationProposalResponse,
   NodeMetricsResponse,
+  ProposalEvaluationRequest,
+  ProposalEvaluationResponse,
   RunSummary,
   Topology,
   WorkflowSpecResponse,
@@ -37,9 +42,51 @@ export async function proposeSpecMutation(
   return r.json();
 }
 
+export async function evaluateSpecProposal(
+  workflow: string,
+  payload: ProposalEvaluationRequest
+): Promise<ProposalEvaluationResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}/evaluate-proposal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      n_per_fixture: payload.n_per_fixture ?? 1,
+      max_cost_usd: payload.max_cost_usd ?? 2.0,
+    }),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `proposal evaluation ${r.status}`);
+  }
+  return r.json();
+}
+
+export async function applySpecProposal(
+  workflow: string,
+  payload: ApplyProposalRequest
+): Promise<ApplyProposalResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}/apply-proposal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `proposal apply ${r.status}`);
+  }
+  return r.json();
+}
+
 export async function fetchRuns(): Promise<RunSummary[]> {
   const r = await fetch(`${BASE}/api/runs`);
   if (!r.ok) throw new Error(`runs fetch ${r.status}`);
+  return r.json();
+}
+
+export async function fetchApprovals(): Promise<ApprovalSummary[]> {
+  const r = await fetch(`${BASE}/api/approvals`);
+  if (!r.ok) throw new Error(`approvals fetch ${r.status}`);
   return r.json();
 }
 

@@ -17,7 +17,12 @@ from backend.graphspec import load_workflow_metadata
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.errors import BuilderValidationError, ReplayError
 from backend.runtime.executor import RunResult, run_graph
-from backend.runtime.executor import _gate_router_factory, _node_factory, _router_dispatch_factory
+from backend.runtime.executor import (
+    _approval_dispatch_factory,
+    _gate_router_factory,
+    _node_factory,
+    _router_dispatch_factory,
+)
 from backend.runtime.state import new_state
 
 
@@ -147,10 +152,12 @@ def _history_app(metadata: GraphMetadata, checkpoint_path: Path, *, run_id: str)
             enforcer,
             run_id=run_id,
             graph_name=metadata.name,
+            run_dir=checkpoint_path.parent,
             cancellation=None,
         ),
         gate_router_factory=_gate_router_factory(run_id, metadata.name),
         router_dispatch_factory=_router_dispatch_factory(),
+        approval_dispatch_factory=_approval_dispatch_factory(),
     )
     with SqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
         yield compiled_sg.compile(checkpointer=saver)

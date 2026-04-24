@@ -7,7 +7,7 @@ import SpecInspector from "./components/SpecInspector";
 import { fetchNodeMetrics, fetchTopology, fetchWorkflowSpec } from "./api/client";
 import { useLiveUpdates } from "./live/useLiveUpdates";
 
-const WORKFLOWS = ["coder_tester", "linear_rag", "supervisor_loop", "dispatch_aggregate"] as const;
+const WORKFLOWS = ["coder_tester", "linear_rag", "supervisor_loop", "dispatch_aggregate", "approval_review"] as const;
 type InspectorTab = "node" | "source" | "validation" | "propose";
 
 export default function App() {
@@ -85,6 +85,9 @@ export default function App() {
             selectedNodeId={selectedNode}
             tab={inspectorTab}
             onTabChange={setInspectorTab}
+            onApplied={async () => {
+              await Promise.all([spec.refetch(), topo.refetch()]);
+            }}
           />
         </div>
         <div className="border-b flex-none">

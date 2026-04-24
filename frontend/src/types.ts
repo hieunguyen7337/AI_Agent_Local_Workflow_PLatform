@@ -1,4 +1,4 @@
-export type NodeKind = "llm" | "tester" | "gate" | "retriever" | "router";
+export type NodeKind = "llm" | "tester" | "gate" | "retriever" | "router" | "approval";
 
 export interface GraphNode {
   id: string;
@@ -67,6 +67,53 @@ export interface MutationProposalResponse {
   validation_errors: string[];
 }
 
+export interface ProposalEvaluationRequest {
+  proposed_yaml: string;
+  n_per_fixture?: number;
+  max_cost_usd?: number;
+}
+
+export interface ProposalEvaluationResponse {
+  workflow: string;
+  status: "ok" | "invalid" | "cancelled" | "stopped_cost_cap";
+  validation_errors: string[];
+  eval: null | {
+    completed_run_count: number;
+    completed_fixture_count: number;
+    overall: {
+      total_runs: number;
+      passes: number;
+      pass_rate: number;
+      mean_cost_usd: number;
+      mean_latency_ms: number;
+      p95_latency_ms: number;
+      cost_stdev_usd: number;
+      latency_stdev_ms: number;
+    };
+    overall_ci: Record<string, unknown>;
+    baseline_comparison: Record<string, unknown>;
+  };
+  run_artifact: string | null;
+}
+
+export interface ApplyProposalRequest {
+  proposed_yaml: string;
+  proposal_summary?: string;
+  evaluation_artifact?: string | null;
+  accepted_by?: string;
+}
+
+export interface ApplyProposalResponse {
+  workflow: string;
+  status: "applied";
+  source_path: string;
+  audit_path: string;
+  rollback_path: string;
+  diff: string;
+  spec: WorkflowSpecResponse["spec"];
+  yaml: string;
+}
+
 export interface NodeMetric {
   node_id: string;
   runs_considered: number;
@@ -95,4 +142,17 @@ export interface RunSummary {
   cost_usd: number;
   latency_ms: number;
   error: string | null;
+}
+
+export interface ApprovalSummary {
+  workflow: string;
+  run_id: string;
+  node_id: string;
+  prompt: string;
+  approval_state_key: string;
+  approved_target: string;
+  rejected_target: string;
+  created_ns: number;
+  artifact_path?: string;
+  state_snapshot?: Record<string, unknown>;
 }

@@ -81,6 +81,16 @@ class RouterNodeConfig(NodeConfig):
     default_target: str | None = None
 
 
+class ApprovalNodeConfig(NodeConfig):
+    """Human approval interrupt node."""
+
+    kind: Literal["approval"] = "approval"
+    prompt: str
+    approval_state_key: str = "approval_decision"
+    approved_target: str
+    rejected_target: str
+
+
 class LoopConfig(BaseModel):
     """Attached to a back-edge. M1 design rule: every loop has max_iterations."""
 

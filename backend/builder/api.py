@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from backend.runtime.errors import BuilderValidationError
 
 from .nodes import (
+    ApprovalNodeConfig,
     GateNodeConfig,
     LLMNodeConfig,
     LoopConfig,
@@ -64,6 +65,13 @@ class GraphMetadata:
                 for target, label in ((cfg.pass_target, "pass"), (cfg.fail_target, "fail")):
                     if (nid, target) in loop_pairs:
                         continue
+                    dst = "END" if target == END else target
+                    lines.append(f"    {nid} -->|{label}| {dst}")
+            if isinstance(cfg, ApprovalNodeConfig):
+                for target, label in (
+                    (cfg.approved_target, "approved"),
+                    (cfg.rejected_target, "rejected"),
+                ):
                     dst = "END" if target == END else target
                     lines.append(f"    {nid} -->|{label}| {dst}")
             if isinstance(cfg, RouterNodeConfig):
@@ -159,6 +167,15 @@ class GraphBuilder:
                     raise BuilderValidationError(
                         f"gate {cfg.id!r} fail_target {cfg.fail_target!r} does not exist"
                     )
+            if isinstance(cfg, ApprovalNodeConfig):
+                if cfg.approved_target != END and cfg.approved_target not in node_ids:
+                    raise BuilderValidationError(
+                        f"approval {cfg.id!r} approved_target {cfg.approved_target!r} does not exist"
+                    )
+                if cfg.rejected_target != END and cfg.rejected_target not in node_ids:
+                    raise BuilderValidationError(
+                        f"approval {cfg.id!r} rejected_target {cfg.rejected_target!r} does not exist"
+                    )
             if isinstance(cfg, RouterNodeConfig):
                 if not cfg.routes:
                     raise BuilderValidationError(f"router {cfg.id!r} requires at least one route")
@@ -196,6 +213,7 @@ __all__ = [
     "END",
     "GraphBuilder",
     "GraphMetadata",
+    "ApprovalNodeConfig",
     "LLMNodeConfig",
     "RetrieverNodeConfig",
     "TesterNodeConfig",

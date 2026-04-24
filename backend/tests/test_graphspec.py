@@ -30,6 +30,15 @@ def test_loads_yaml_graph_spec():
     assert {node.id for node in spec.nodes} == {"planner", "coder", "tester", "gate"}
 
 
+def test_loads_approval_graph_spec():
+    spec = load_graph_spec("approval_review")
+    assert spec.name == "approval_review"
+    approval = next(node for node in spec.nodes if node.id == "human_review")
+    assert approval.kind == "approval"
+    assert approval.approved_target == "finalizer"
+    assert approval.rejected_target == END
+
+
 def test_graph_spec_converts_to_metadata():
     metadata = graph_spec_to_metadata(load_graph_spec("linear_rag"))
     assert metadata.name == "linear_rag"
@@ -151,6 +160,26 @@ def test_graph_spec_rejects_bad_router_and_loop_targets():
                     }
                 ],
                 "loops": [{"from": "a", "to": "missing", "max_iterations": 1}],
+            }
+        )
+
+
+def test_graph_spec_rejects_bad_approval_targets():
+    with pytest.raises(ValidationError, match="approved_target 'missing' does not exist"):
+        GraphSpec.model_validate(
+            {
+                "name": "bad",
+                "budget": {"cost_usd": 0.1, "latency_ms": 1000},
+                "entry": "review",
+                "nodes": [
+                    {
+                        "id": "review",
+                        "kind": "approval",
+                        "prompt": "Review this.",
+                        "approved_target": "missing",
+                        "rejected_target": END,
+                    }
+                ],
             }
         )
 

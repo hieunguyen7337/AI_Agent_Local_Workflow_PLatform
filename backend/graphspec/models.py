@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.builder.api import END
 from backend.builder.nodes import (
+    ApprovalNodeConfig,
     GateNodeConfig,
     LLMNodeConfig,
     RetrieverNodeConfig,
@@ -15,7 +16,12 @@ from backend.builder.nodes import (
 )
 
 GraphNodeSpec = Annotated[
-    LLMNodeConfig | TesterNodeConfig | RetrieverNodeConfig | GateNodeConfig | RouterNodeConfig,
+    LLMNodeConfig
+    | TesterNodeConfig
+    | RetrieverNodeConfig
+    | GateNodeConfig
+    | RouterNodeConfig
+    | ApprovalNodeConfig,
     Field(discriminator="kind"),
 ]
 
@@ -96,6 +102,15 @@ class GraphSpec(BaseModel):
                 ):
                     raise ValueError(
                         f"router {node.id!r} default_target {node.default_target!r} does not exist"
+                    )
+            if isinstance(node, ApprovalNodeConfig):
+                if node.approved_target != END and node.approved_target not in known:
+                    raise ValueError(
+                        f"approval {node.id!r} approved_target {node.approved_target!r} does not exist"
+                    )
+                if node.rejected_target != END and node.rejected_target not in known:
+                    raise ValueError(
+                        f"approval {node.id!r} rejected_target {node.rejected_target!r} does not exist"
                     )
 
         for loop in self.loops:

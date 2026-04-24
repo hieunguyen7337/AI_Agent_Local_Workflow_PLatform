@@ -22,6 +22,34 @@ class _Replies:
         return self._replies.pop(0)
 
 
+class _DispatchReplies:
+    def __call__(self, **kwargs) -> LLMResponse:
+        prompt = kwargs["messages"][1]["content"]
+        if "Specialist A notes:" in prompt and "Specialist B notes:" in prompt:
+            return LLMResponse(
+                text="Local-first workflow tools improve fast feedback and audit trail quality for teams.",
+                usage=Usage(1, 1),
+                model="gpt-4o-mini",
+            )
+        if "Write Specialist A notes" in prompt:
+            return LLMResponse(
+                text="- fast feedback keeps iteration tight",
+                usage=Usage(1, 1),
+                model="gpt-4o-mini",
+            )
+        if "Write Specialist B notes" in prompt:
+            return LLMResponse(
+                text="- audit trail preserves reviewable history",
+                usage=Usage(1, 1),
+                model="gpt-4o-mini",
+            )
+        return LLMResponse(
+            text="Specialist A: cover fast feedback. Specialist B: cover audit trail.",
+            usage=Usage(1, 1),
+            model="gpt-4o-mini",
+        )
+
+
 def test_dispatch_aggregate_compile_shape():
     metadata = dispatch_aggregate.build_compiled()
     assert metadata.entry == "dispatcher"
@@ -46,29 +74,7 @@ def test_dispatch_aggregate_runtime_and_eval(monkeypatch, tmp_path: Path):
         encoding="utf-8",
     )
 
-    replies = [
-        LLMResponse(
-            text="Specialist A: cover fast feedback. Specialist B: cover audit trail.",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-        LLMResponse(
-            text="- fast feedback keeps iteration tight",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-        LLMResponse(
-            text="- audit trail preserves reviewable history",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-        LLMResponse(
-            text="Local-first workflow tools improve fast feedback and audit trail quality for teams.",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-    ]
-    monkeypatch.setattr(oai, "stream_openai", _Replies(replies))
+    monkeypatch.setattr(oai, "stream_openai", _DispatchReplies())
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
     metadata = dispatch_aggregate.build_compiled()
@@ -83,29 +89,7 @@ def test_dispatch_aggregate_runtime_and_eval(monkeypatch, tmp_path: Path):
     assert "audit trail" in run.final_state.get("specialist_b_notes", "").lower()
     assert "fast feedback and audit trail" in run.final_state.get("final_answer", "").lower()
 
-    eval_replies = [
-        LLMResponse(
-            text="Specialist A: cover fast feedback. Specialist B: cover audit trail.",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-        LLMResponse(
-            text="- fast feedback keeps iteration tight",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-        LLMResponse(
-            text="- audit trail preserves reviewable history",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-        LLMResponse(
-            text="Local-first workflow tools improve fast feedback and audit trail quality for teams.",
-            usage=Usage(1, 1),
-            model="gpt-4o-mini",
-        ),
-    ]
-    monkeypatch.setattr(oai, "stream_openai", _Replies(eval_replies))
+    monkeypatch.setattr(oai, "stream_openai", _DispatchReplies())
     out = run_eval(
         workflow="dispatch_aggregate",
         n_per_fixture=1,

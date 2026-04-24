@@ -9,7 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from backend.builder.api import END, GateNodeConfig, GraphBuilder, LLMNodeConfig, TesterNodeConfig
+from backend.builder.api import (
+    END,
+    ApprovalNodeConfig,
+    GateNodeConfig,
+    GraphBuilder,
+    LLMNodeConfig,
+    TesterNodeConfig,
+)
 from backend.providers import openai as oai
 from backend.providers import openrouter as orouter
 from backend.providers.base import LLMResponse, Usage
@@ -233,3 +240,30 @@ def test_cancellation_during_llm_generation_marks_run_cancelled(monkeypatch, tmp
     assert result.status == "cancelled"
     assert result.error == "user_cancelled"
     assert result.final_state.get("coder_output", "") == ""
+
+
+def test_approval_node_halts_with_pending_artifact(tmp_runs_root):
+    b = GraphBuilder(name="approval_test", cost_budget_usd=1.0, latency_budget_ms=60_000)
+    b.add_node(
+        ApprovalNodeConfig(
+            id="review",
+            prompt="Review before continuing.",
+            approved_target=END,
+            rejected_target=END,
+        )
+    )
+    b.set_entry("review")
+
+    result = run_graph(b.compile(), user_input="needs review", runs_root=tmp_runs_root)
+
+    assert result.status == "pending_approval"
+    assert result.error is None
+    approval_path = result.run_dir / "approval.json"
+    assert approval_path.exists()
+    approval = json.loads(approval_path.read_text(encoding="utf-8"))
+    assert approval["workflow"] == "approval_test"
+    assert approval["run_id"] == result.run_id
+    assert approval["node_id"] == "review"
+    assert approval["prompt"] == "Review before continuing."
+    assert approval["state_snapshot"]["user_input"] == "needs review"
+    assert result.final_state["pending_approval"]["node_id"] == "review"

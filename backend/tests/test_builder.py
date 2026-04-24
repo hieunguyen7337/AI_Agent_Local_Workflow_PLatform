@@ -5,6 +5,7 @@ import pytest
 
 from backend.builder.api import (
     END,
+    ApprovalNodeConfig,
     GateNodeConfig,
     GraphBuilder,
     LLMNodeConfig,
@@ -122,6 +123,21 @@ def test_router_target_validation():
     assert "dispatch" in m.nodes
 
 
+def test_approval_target_validation():
+    b = _basic_builder()
+    b.add_node(
+        ApprovalNodeConfig(
+            id="review",
+            prompt="Review.",
+            approved_target=END,
+            rejected_target="missing",
+        )
+    )
+    b.set_entry("review")
+    with pytest.raises(BuilderValidationError, match="rejected_target"):
+        b.compile()
+
+
 def test_non_conditional_loop_source_rejects_forward_edges():
     b = _basic_builder()
     b.add_node(_llm("a"))
@@ -208,6 +224,7 @@ def test_fanout_join_executes_aggregator_after_both_branches():
         node_factory=node_factory,
         gate_router_factory=lambda cfg, loop: (_ for _ in ()).throw(AssertionError("no gates expected")),
         router_dispatch_factory=lambda cfg: (_ for _ in ()).throw(AssertionError("no routers expected")),
+        approval_dispatch_factory=lambda cfg: (_ for _ in ()).throw(AssertionError("no approvals expected")),
     ).compile()
     out = app.invoke(
         {

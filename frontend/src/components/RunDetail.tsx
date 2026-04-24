@@ -21,6 +21,26 @@ export default function RunDetail({ runId }: { runId: string }) {
       {run.error && (
         <div className="p-2 rounded bg-red-50 text-red-800 text-xs whitespace-pre-wrap">{run.error}</div>
       )}
+      {run.approval && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
+          <div className="font-medium">Pending approval</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="uppercase text-amber-700">Node</div>
+              <div className="font-mono">{run.approval.node_id}</div>
+            </div>
+            <div>
+              <div className="uppercase text-amber-700">Created</div>
+              <div>{run.approval.created_ns ? new Date(run.approval.created_ns / 1_000_000).toLocaleString() : "-"}</div>
+            </div>
+          </div>
+          <div>
+            <div className="uppercase text-amber-700">Prompt</div>
+            <div className="whitespace-pre-wrap">{run.approval.prompt}</div>
+          </div>
+          <div className="font-mono text-[11px] text-amber-800">{run.approval.artifact_path}</div>
+        </div>
+      )}
       <div>
         <div className="text-xs uppercase text-gray-500 mb-1">Spans</div>
         <div className="space-y-1">

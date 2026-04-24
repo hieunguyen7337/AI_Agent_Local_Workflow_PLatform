@@ -13,6 +13,7 @@ from backend.budget.enforcer import BudgetEnforcer
 from backend.builder.api import GraphMetadata
 from backend.builder.compile import compile_to_langgraph
 from backend.builder.nodes import (
+    ApprovalNodeConfig,
     GateNodeConfig,
     LLMNodeConfig,
     LoopConfig,
@@ -27,8 +28,10 @@ from backend.runtime.errors import (
     BuilderValidationError,
     CancelledError,
     MaxIterationsError,
+    PendingApprovalError,
     WorkflowError,
 )
+from backend.runtime.nodes.approval import make_approval_dispatcher, make_approval_node
 from backend.runtime.nodes.gate import make_gate_passthrough, make_gate_router
 from backend.runtime.nodes.llm import make_llm_node
 from backend.runtime.nodes.retriever import make_retriever_node
@@ -65,6 +68,7 @@ def _node_factory(
     *,
     run_id: str,
     graph_name: str,
+    run_dir: Path,
     cancellation: CancellationController | None,
 ):
     def _on_cost(usd: float) -> None:
@@ -72,6 +76,13 @@ def _node_factory(
 
     def _make(cfg: NodeConfig, metadata: GraphMetadata):
         base = None
+        if isinstance(cfg, ApprovalNodeConfig):
+            return make_approval_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+            )
         if isinstance(cfg, LLMNodeConfig):
             base = make_llm_node(
                 cfg,
@@ -121,6 +132,13 @@ def _gate_router_factory(run_id: str, graph_name: str):
 def _router_dispatch_factory():
     def _make(cfg: RouterNodeConfig):
         return make_router_dispatcher(cfg)
+
+    return _make
+
+
+def _approval_dispatch_factory():
+    def _make(cfg: ApprovalNodeConfig):
+        return make_approval_dispatcher(cfg)
 
     return _make
 
@@ -198,10 +216,12 @@ def run_graph(
             enforcer,
             run_id=run_id,
             graph_name=metadata.name,
+            run_dir=run_dir,
             cancellation=cancellation,
         ),
         gate_router_factory=_gate_router_factory(run_id, metadata.name),
         router_dispatch_factory=_router_dispatch_factory(),
+        approval_dispatch_factory=_approval_dispatch_factory(),
     )
 
     checkpoint_path = run_dir / "checkpoints.db"
@@ -257,6 +277,12 @@ def run_graph(
             except CancelledError as ce:
                 status = "cancelled"
                 error = str(ce)
+                span.set_attribute(WORKFLOW_STATUS, status)
+            except PendingApprovalError as pae:
+                status = "pending_approval"
+                error = None
+                last_state.update(pae.state_update)
+                final_state = last_state
                 span.set_attribute(WORKFLOW_STATUS, status)
             except BudgetExceededError:
                 pass
