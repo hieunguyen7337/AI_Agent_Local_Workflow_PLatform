@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from backend.server import routes
 from backend.server.app import app
 from backend.telemetry.exporter import ensure_schema
+from backend.providers.base import LLMResponse, Usage
 
 
 def _write_single_run(runs_root: Path) -> None:
@@ -95,6 +96,9 @@ def test_get_graph_supervisor_loop_shape():
     labels = {(edge["source"], edge["label"], edge["target"]) for edge in body["edges"] if edge["kind"] == "conditional"}
     assert ("dispatch", "RESEARCHER", "researcher") in labels
     assert ("dispatch", "WRITER", "writer") in labels
+    dispatch = next(node for node in body["nodes"] if node["id"] == "dispatch")
+    assert dispatch["kind"] == "router"
+    assert dispatch["metadata"]["routes"]["RESEARCHER"] == "researcher"
 
 
 def test_get_graph_dispatch_aggregate_shape():
@@ -110,3 +114,99 @@ def test_get_graph_dispatch_aggregate_shape():
     assert ("dispatcher", "specialist_b", "normal") in edges
     assert ("specialist_a", "aggregator", "normal") in edges
     assert ("specialist_b", "aggregator", "normal") in edges
+
+
+def test_get_spec_returns_yaml_and_validated_spec():
+    client = TestClient(app)
+    resp = client.get("/api/spec/coder_tester")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["workflow"] == "coder_tester"
+    assert body["source_path"] == "workflows/coder_tester.yaml"
+    assert "schema_version: workflow.graph/v1" in body["yaml"]
+    assert body["spec"]["name"] == "coder_tester"
+    assert body["spec"]["entry"] == "planner"
+
+
+def test_get_spec_supervisor_loop_includes_router_routes():
+    client = TestClient(app)
+    resp = client.get("/api/spec/supervisor_loop")
+    assert resp.status_code == 200
+    body = resp.json()
+    dispatch = next(node for node in body["spec"]["nodes"] if node["id"] == "dispatch")
+    assert dispatch["kind"] == "router"
+    assert dispatch["routes"]["RESEARCHER"] == "researcher"
+    assert dispatch["routes"]["FINISH"] == "__end__"
+
+
+def test_get_spec_missing_workflow_returns_404():
+    client = TestClient(app)
+    resp = client.get("/api/spec/not_a_workflow")
+    assert resp.status_code == 404
+
+
+def test_propose_mutation_returns_valid_diff(monkeypatch):
+    current_yaml = Path("workflows/coder_tester.yaml").read_text(encoding="utf-8")
+    proposed_yaml = current_yaml.replace("temperature: 0.2", "temperature: 0.1", 1)
+
+    def _fake_call_provider(**kwargs):
+        return LLMResponse(
+            text=f"Summary: Lowered planner temperature.\n{proposed_yaml}",
+            usage=Usage(1, 1),
+            model="gpt-4o-mini",
+        )
+
+    monkeypatch.setattr("backend.graphspec.mutation.call_provider", _fake_call_provider)
+    before = Path("workflows/coder_tester.yaml").read_text(encoding="utf-8")
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/spec/coder_tester/propose-mutation",
+        json={"goal": "Make planner output more deterministic."},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "valid"
+    assert body["summary"] == "Lowered planner temperature."
+    assert "temperature: 0.1" in body["proposed_yaml"]
+    assert "-    temperature: 0.2" in body["diff"]
+    assert "+    temperature: 0.1" in body["diff"]
+    assert body["validation_errors"] == []
+    assert Path("workflows/coder_tester.yaml").read_text(encoding="utf-8") == before
+
+
+def test_propose_mutation_returns_invalid_validation_errors(monkeypatch):
+    def _fake_call_provider(**kwargs):
+        return LLMResponse(
+            text="schema_version: workflow.graph/v1\nname: broken\nentry: missing\nnodes: []\nbudget:\n  cost_usd: 0.1\n  latency_ms: 1000\n",
+            usage=Usage(1, 1),
+            model="gpt-4o-mini",
+        )
+
+    monkeypatch.setattr("backend.graphspec.mutation.call_provider", _fake_call_provider)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/spec/coder_tester/propose-mutation",
+        json={"goal": "Break it for test coverage."},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "invalid"
+    assert body["proposed_yaml"].startswith("schema_version")
+    assert body["validation_errors"]
+
+
+def test_propose_mutation_requires_goal():
+    client = TestClient(app)
+    resp = client.post("/api/spec/coder_tester/propose-mutation", json={"goal": ""})
+    assert resp.status_code == 422
+
+
+def test_propose_mutation_missing_workflow_returns_404():
+    client = TestClient(app)
+    resp = client.post(
+        "/api/spec/not_a_workflow/propose-mutation",
+        json={"goal": "Reduce cost."},
+    )
+    assert resp.status_code == 404

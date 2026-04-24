@@ -1,7 +1,6 @@
 """Eval harness: run a workflow N times against a fixture set, emit metrics JSON."""
 from __future__ import annotations
 
-import importlib
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -9,6 +8,7 @@ from pathlib import Path
 from backend.evals.fixtures import Fixture, load_fixtures
 from backend.evals.metrics import EvalSummary, confidence_intervals, summarize
 from backend.evals.regression import build_baseline_snapshot, compare_against_baseline
+from backend.graphspec import load_workflow_metadata
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
 
@@ -26,8 +26,7 @@ def run_eval(
     update_baseline: bool = False,
     cancellation: CancellationController | None = None,
 ) -> dict:
-    module = importlib.import_module(f"backend.workflows.{workflow}")
-    metadata = module.build_compiled()
+    metadata = load_workflow_metadata(workflow)
     has_tester_node = any(getattr(cfg, "kind", "") == "tester" for cfg in metadata.nodes.values())
 
     fixtures_path = fixtures_path or EVALS_ROOT / workflow / "fixtures.yaml"

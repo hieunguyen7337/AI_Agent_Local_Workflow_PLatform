@@ -1,13 +1,21 @@
-# Local AI Workflow Platform - M3.2
+# Local AI Workflow Platform - M3.3
 
 A local-first platform to author, run, visualize, and iterate on AI workflows.
-M3.2 adds a fourth reference workflow pattern, keeping Python as the executable source of truth:
+M3.3 promotes declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec` and compiled into the existing LangGraph runtime:
+
+## Vision
+
+This project aims to become an adaptable framework for many types of agent workflow and pipeline, including RAG, coder/tester loops, orchestrators, routers, and other multi-agent patterns.
+
+Each workflow should be built from a simple source-of-truth file that is easy for an LLM to understand, analyze, mutate, and iterate on. For humans, the same source of truth should render into a frontend graph that shows the workflow structure and each node's metadata, so the full pipeline is easy to inspect and modification proposals are easy to reason about.
+
 - `coder_tester`: `planner -> coder -> tester -> gate -> (coder | END)`
 - `linear_rag`: `query_analyser -> retriever -> reranker -> synthesiser -> END`
 - `supervisor_loop`: `supervisor -> dispatch -> (researcher | writer | END)` with bounded specialist loop-backs
 - `dispatch_aggregate`: `dispatcher -> specialist_a + specialist_b -> aggregator -> END`
 
-- Authoring: typed Python builder (`backend/builder/`)
+- Authoring: YAML workflow specs (`workflows/*.yaml`) backed by Pydantic `GraphSpec` (`backend/graphspec/`)
+- Compatibility: typed Python builder (`backend/builder/`) remains as a fallback during migration
 - Runtime: LangGraph `StateGraph` + SQLite checkpointing
 - Telemetry: OpenTelemetry-style span export to SQLite + JSONL
 - Budget: cost + latency enforcement after a node completes and before the next node dispatches
@@ -18,7 +26,7 @@ M3.2 adds a fourth reference workflow pattern, keeping Python as the executable 
 - Workflow defaults: `coder_tester` -> OpenRouter `minimax/minimax-m2.7`; `linear_rag`, `supervisor_loop`, and `dispatch_aggregate` -> OpenAI `gpt-4o-mini`
 - Pricing: provider/model rates loaded from `prices.yaml`; budget correctness does not depend on provider stream-abort support
 
-See [claude_full_plan.md](claude_full_plan.md) for the base architecture and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
+See [docs/graphspec_decision.md](docs/graphspec_decision.md) for the source-of-truth decision, [claude_full_plan.md](claude_full_plan.md) for the base architecture, and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
 
 ## Full Setup (Windows PowerShell)
 
@@ -61,7 +69,7 @@ npm install
 cd ..
 ```
 
-## Verify M3.2 End-to-End
+## Verify M3.3 End-to-End
 
 From repo root (Windows commands shown):
 
@@ -216,6 +224,14 @@ Expected behavior:
 - provider/model pricing is loaded from [prices.yaml](prices.yaml)
 - runtime nodes resolve providers through the shared adapter layer in [backend/providers](backend/providers)
 
+## Workflow Source Of Truth
+
+- Canonical editable specs live in [workflows](workflows).
+- Specs are parsed by [backend/graphspec](backend/graphspec), validated as `GraphSpec`, and adapted to the existing runtime `GraphMetadata`.
+- CLI, eval, replay, and API loading prefer YAML specs and fall back to Python workflow modules only for compatibility.
+- `/api/graph/{workflow}` returns topology plus full node metadata so the frontend can show both graph shape and node configuration.
+- YAML is the human/LLM editing format. Pydantic `GraphSpec` is the trusted contract.
+
 ## Replay Behavior
 
 - `workflow replay` now forks into a new run directory instead of mutating the source run
@@ -235,13 +251,15 @@ Expected behavior:
 
 ## Where To Read The Pipeline (for Optimization)
 
-1. Workflow source-of-truth modules
-- [backend/workflows/coder_tester.py](backend/workflows/coder_tester.py)
-- [backend/workflows/linear_rag.py](backend/workflows/linear_rag.py)
-- [backend/workflows/supervisor_loop.py](backend/workflows/supervisor_loop.py)
-- [backend/workflows/dispatch_aggregate.py](backend/workflows/dispatch_aggregate.py)
+1. Workflow source-of-truth specs
+- [workflows/coder_tester.yaml](workflows/coder_tester.yaml)
+- [workflows/linear_rag.yaml](workflows/linear_rag.yaml)
+- [workflows/supervisor_loop.yaml](workflows/supervisor_loop.yaml)
+- [workflows/dispatch_aggregate.yaml](workflows/dispatch_aggregate.yaml)
 
-2. Builder and compilation
+2. GraphSpec, builder, and compilation
+- [backend/graphspec/models.py](backend/graphspec/models.py)
+- [backend/graphspec/loader.py](backend/graphspec/loader.py)
 - [backend/builder/api.py](backend/builder/api.py)
 - [backend/builder/compile.py](backend/builder/compile.py)
 - [backend/builder/validation.py](backend/builder/validation.py)
@@ -291,11 +309,12 @@ runs/eval_supervisor_loop.json
 runs/eval_dispatch_aggregate.json
 ```
 
-## M3.2 Limits (by design)
+## M3.3 Limits (by design)
 
 - Four reference workflows only (`coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`)
 - Two direct providers only (`openrouter`, `openai`)
-- Source of truth is still the Python builder/workflow modules, not a separate declarative `GraphSpec`
+- YAML workflow specs are the editable source of truth; Python workflow modules remain only as compatibility fallback
+- JSON graph import/export is still deferred until the YAML + `GraphSpec` contract stabilizes
 - Branch outputs in `dispatch_aggregate` remain fixed named state keys rather than a generic map-reduce collection
 - Replay stays within the same workflow id and still assumes stable node ids for the selected replay point
 - Generic replay migration covers additive/removal schema changes; rename-level changes need workflow hook logic

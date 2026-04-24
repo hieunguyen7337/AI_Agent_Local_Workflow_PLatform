@@ -92,6 +92,11 @@ def make_llm_node(
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 raise
             except Exception as e:
+                if cancellation is not None and cancellation.is_cancelled():
+                    cancelled = CancelledError("user_cancelled")
+                    span.set_attribute(WORKFLOW_STATUS, "cancelled")
+                    span.set_status(Status(StatusCode.ERROR, str(cancelled)))
+                    raise cancelled from e
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 raise
 

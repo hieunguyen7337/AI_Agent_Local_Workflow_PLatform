@@ -1,10 +1,39 @@
-import type { NodeMetricsResponse, RunSummary, Topology } from "../types";
+import type {
+  MutationProposalRequest,
+  MutationProposalResponse,
+  NodeMetricsResponse,
+  RunSummary,
+  Topology,
+  WorkflowSpecResponse,
+} from "../types";
 
 const BASE = "";
 
 export async function fetchTopology(workflow: string): Promise<Topology> {
   const r = await fetch(`${BASE}/api/graph/${workflow}`);
   if (!r.ok) throw new Error(`graph fetch ${r.status}`);
+  return r.json();
+}
+
+export async function fetchWorkflowSpec(workflow: string): Promise<WorkflowSpecResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}`);
+  if (!r.ok) throw new Error(`spec fetch ${r.status}`);
+  return r.json();
+}
+
+export async function proposeSpecMutation(
+  workflow: string,
+  payload: MutationProposalRequest
+): Promise<MutationProposalResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}/propose-mutation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, max_proposals: payload.max_proposals ?? 1 }),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `mutation proposal ${r.status}`);
+  }
   return r.json();
 }
 

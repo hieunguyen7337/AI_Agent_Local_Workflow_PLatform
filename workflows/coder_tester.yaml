@@ -1,0 +1,61 @@
+schema_version: workflow.graph/v1
+name: coder_tester
+description: Planner, coder, sandbox/LLM tester, and retry gate.
+budget:
+  cost_usd: 0.50
+  latency_ms: 300000
+entry: planner
+nodes:
+  - id: planner
+    kind: llm
+    provider: openrouter
+    model: minimax/minimax-m2.7
+    system_prompt: >-
+      You are a senior software engineer. Break the user's task into a short,
+      numbered plan (3-6 steps). Be concrete.
+    user_prompt_template: |-
+      Task:
+      {user_input}
+    output_state_key: plan
+    temperature: 0.2
+  - id: coder
+    kind: llm
+    provider: openrouter
+    model: minimax/minimax-m2.7
+    system_prompt: >-
+      You are a careful coder. Write Python code that fulfills the plan.
+      Return ONLY the code, no markdown fences, no explanation.
+      If there is prior tester feedback, address it specifically.
+    user_prompt_template: |-
+      Original task:
+      {user_input}
+
+      Plan:
+      {plan}
+
+      Previous attempt (if any):
+      {coder_output}
+
+      Tester feedback (if any):
+      {tester_feedback}
+    output_state_key: coder_output
+    temperature: 0.2
+  - id: tester
+    kind: tester
+    provider: openrouter
+    model: minimax/minimax-m2.7
+  - id: gate
+    kind: gate
+    pass_target: __end__
+    fail_target: coder
+edges:
+  - from: planner
+    to: coder
+  - from: coder
+    to: tester
+  - from: tester
+    to: gate
+loops:
+  - from: gate
+    to: coder
+    max_iterations: 3

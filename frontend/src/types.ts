@@ -1,10 +1,11 @@
-export type NodeKind = "llm" | "tester" | "gate" | "retriever";
+export type NodeKind = "llm" | "tester" | "gate" | "retriever" | "router";
 
 export interface GraphNode {
   id: string;
   kind: NodeKind;
   name: string;
   description: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface GraphEdge {
@@ -29,6 +30,41 @@ export interface Topology {
   nodes: GraphNode[];
   edges: GraphEdge[];
   loops: GraphLoop[];
+}
+
+export interface WorkflowSpecResponse {
+  workflow: string;
+  spec: {
+    schema_version: string;
+    name: string;
+    description: string;
+    budget: {
+      cost_usd: number;
+      latency_ms: number;
+    };
+    entry: string;
+    nodes: Array<Record<string, unknown> & { id: string; kind: NodeKind }>;
+    edges: Array<{ from?: string; source?: string; to?: string; target?: string }>;
+    loops: Array<{ from?: string; source?: string; to?: string; target?: string; max_iterations: number }>;
+  };
+  yaml: string;
+  source_path: string;
+}
+
+export interface MutationProposalRequest {
+  goal: string;
+  constraints?: string;
+  max_proposals?: number;
+}
+
+export interface MutationProposalResponse {
+  workflow: string;
+  status: "valid" | "invalid";
+  summary: string;
+  original_yaml: string;
+  proposed_yaml: string;
+  diff: string;
+  validation_errors: string[];
 }
 
 export interface NodeMetric {

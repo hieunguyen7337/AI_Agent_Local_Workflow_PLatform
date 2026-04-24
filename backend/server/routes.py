@@ -1,16 +1,18 @@
 """FastAPI routes: read-only access to topology and runs."""
 from __future__ import annotations
 
-import importlib
 import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field, ValidationError
 
 from backend.builder.api import GraphMetadata
 from backend.builder.nodes import GateNodeConfig, RouterNodeConfig
+from backend.graphspec import load_graph_spec_source, load_workflow_metadata, propose_mutation
+from backend.providers.base import ProviderError
 from backend.server.node_metrics import compute_node_metrics
 
 router = APIRouter()
@@ -18,12 +20,17 @@ router = APIRouter()
 RUNS_ROOT = Path("runs")
 
 
+class MutationProposalRequest(BaseModel):
+    goal: str = Field(min_length=1)
+    constraints: str | None = None
+    max_proposals: int = Field(1, ge=1, le=1)
+
+
 def load_workflow(name: str) -> GraphMetadata:
     try:
-        module = importlib.import_module(f"backend.workflows.{name}")
-    except ModuleNotFoundError:
+        return load_workflow_metadata(name)
+    except (FileNotFoundError, ModuleNotFoundError):
         raise HTTPException(404, f"workflow {name!r} not found")
-    return module.build_compiled()
 
 
 def _topology_dict(metadata: GraphMetadata) -> dict:
@@ -35,6 +42,7 @@ def _topology_dict(metadata: GraphMetadata) -> dict:
                 "kind": cfg.kind,
                 "name": cfg.name or nid,
                 "description": cfg.description,
+                "metadata": cfg.model_dump(),
             }
         )
     edges: list[dict] = []
@@ -90,6 +98,48 @@ def _topology_dict(metadata: GraphMetadata) -> dict:
 def get_graph(workflow: str) -> dict:
     metadata = load_workflow(workflow)
     return _topology_dict(metadata)
+
+
+@router.get("/api/spec/{workflow}")
+def get_spec(workflow: str) -> dict:
+    try:
+        spec, yaml_text, source_path = load_graph_spec_source(workflow)
+    except FileNotFoundError:
+        raise HTTPException(404, f"workflow spec {workflow!r} not found")
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(400, f"workflow spec {workflow!r} is invalid: {exc}")
+    return {
+        "workflow": workflow,
+        "spec": spec.model_dump(mode="json"),
+        "yaml": yaml_text,
+        "source_path": source_path.as_posix(),
+    }
+
+
+@router.post("/api/spec/{workflow}/propose-mutation")
+def post_spec_mutation(workflow: str, request: MutationProposalRequest) -> dict:
+    try:
+        proposal = propose_mutation(
+            workflow=workflow,
+            goal=request.goal,
+            constraints=request.constraints,
+            max_proposals=request.max_proposals,
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, f"workflow spec {workflow!r} not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except ProviderError as exc:
+        raise HTTPException(503, f"mutation provider error: {exc}")
+    return {
+        "workflow": proposal.workflow,
+        "status": proposal.status,
+        "summary": proposal.summary,
+        "original_yaml": proposal.original_yaml,
+        "proposed_yaml": proposal.proposed_yaml,
+        "diff": proposal.diff,
+        "validation_errors": proposal.validation_errors,
+    }
 
 
 @router.get("/api/graph/{workflow}/node-metrics")

@@ -1,7 +1,6 @@
 """Typer CLI: run, replay, eval, export-mermaid, serve."""
 from __future__ import annotations
 
-import importlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +11,7 @@ from dotenv import load_dotenv
 
 from backend.checkpointing.replay import parse_set_arg, replay as replay_run
 from backend.evals.harness import run_eval
+from backend.graphspec import load_workflow_metadata
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
 
@@ -21,8 +21,7 @@ load_dotenv()
 
 
 def _load_workflow_metadata(workflow: str):
-    module = importlib.import_module(f"backend.workflows.{workflow}")
-    return module.build_compiled()
+    return load_workflow_metadata(workflow)
 
 
 class _CancelHandler:

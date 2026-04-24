@@ -13,6 +13,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from backend.budget.enforcer import BudgetEnforcer
 from backend.builder.api import GraphBuilder, GraphMetadata
 from backend.builder.compile import compile_to_langgraph
+from backend.graphspec import load_workflow_metadata
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.errors import BuilderValidationError, ReplayError
 from backend.runtime.executor import RunResult, run_graph
@@ -80,6 +81,24 @@ def apply_overrides(builder: GraphBuilder, overrides: dict[str, dict[str, Any]])
         cfg = builder._nodes[node_id]
         updated = cfg.model_copy(update=fields)
         builder._nodes[node_id] = updated
+
+
+def apply_metadata_overrides(metadata: GraphMetadata, overrides: dict[str, dict[str, Any]]) -> GraphMetadata:
+    """Return metadata with node config overrides applied."""
+    nodes = dict(metadata.nodes)
+    for node_id, fields in overrides.items():
+        if node_id not in nodes:
+            raise BuilderValidationError(f"override target node {node_id!r} not in workflow")
+        nodes[node_id] = nodes[node_id].model_copy(update=fields)
+    return GraphMetadata(
+        name=metadata.name,
+        cost_budget_usd=metadata.cost_budget_usd,
+        latency_budget_ms=metadata.latency_budget_ms,
+        nodes=nodes,
+        edges=list(metadata.edges),
+        loops=list(metadata.loops),
+        entry=metadata.entry,
+    )
 
 
 def parse_set_arg(set_args: list[str]) -> dict[str, dict[str, Any]]:
@@ -248,10 +267,9 @@ def replay(
 ) -> ReplayResult:
     """Replay a run from a migrated snapshot into a new forked run."""
     workflow_module = load_workflow_module(workflow)
-    builder = load_workflow(workflow)
+    metadata: GraphMetadata = load_workflow_metadata(workflow)
     if overrides:
-        apply_overrides(builder, overrides)
-    metadata: GraphMetadata = builder.compile()
+        metadata = apply_metadata_overrides(metadata, overrides)
     boundary = resolve_replay_boundary(
         metadata,
         source_run_id=run_id,

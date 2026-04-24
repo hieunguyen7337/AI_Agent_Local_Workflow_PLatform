@@ -1,0 +1,79 @@
+schema_version: workflow.graph/v1
+name: supervisor_loop
+description: Supervisor routes between research and writing specialists until finish.
+budget:
+  cost_usd: 0.60
+  latency_ms: 300000
+entry: supervisor
+nodes:
+  - id: supervisor
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: |-
+      You are a workflow supervisor coordinating two specialists. Choose exactly one next route token based on the current state.
+      Rules:
+      - If research_notes is empty, return RESEARCHER.
+      - Else if final_answer is empty, return WRITER.
+      - Else if final_answer already addresses the task, return FINISH.
+      Return exactly one token on the first line: RESEARCHER, WRITER, or FINISH.
+    user_prompt_template: |-
+      User task:
+      {user_input}
+
+      Research notes:
+      {research_notes}
+
+      Draft answer:
+      {final_answer}
+    output_state_key: supervisor_route
+    temperature: 0.0
+  - id: dispatch
+    kind: router
+    route_state_key: supervisor_route
+    routes:
+      RESEARCHER: researcher
+      WRITER: writer
+      FINISH: __end__
+  - id: researcher
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      You are the research specialist. Extract the constraints, required phrases,
+      and useful facts from the task. Return compact bullet points only.
+    user_prompt_template: |-
+      Task:
+      {user_input}
+
+      Current draft answer:
+      {final_answer}
+    output_state_key: research_notes
+    temperature: 0.0
+  - id: writer
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      You are the writing specialist. Produce a concise final answer using the research notes.
+      Honor any exact phrase requirements from the task or notes.
+    user_prompt_template: |-
+      Task:
+      {user_input}
+
+      Research notes:
+      {research_notes}
+
+      Write the final answer in 2-4 sentences.
+    output_state_key: final_answer
+    temperature: 0.0
+edges:
+  - from: supervisor
+    to: dispatch
+loops:
+  - from: researcher
+    to: supervisor
+    max_iterations: 4
+  - from: writer
+    to: supervisor
+    max_iterations: 4

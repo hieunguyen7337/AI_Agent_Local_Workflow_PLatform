@@ -1,0 +1,67 @@
+schema_version: workflow.graph/v1
+name: linear_rag
+description: Query analysis, local retrieval, reranking, and grounded synthesis.
+budget:
+  cost_usd: 0.50
+  latency_ms: 240000
+entry: query_analyser
+nodes:
+  - id: query_analyser
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      You rewrite user questions into concise retrieval queries.
+      Return a single search query line only.
+    user_prompt_template: |-
+      Question:
+      {user_input}
+    output_state_key: query_analysis
+    temperature: 0.0
+  - id: retriever
+    kind: retriever
+    corpus_path: evals/linear_rag/corpus.yaml
+    query_state_key: query_analysis
+    output_state_key: retrieved_context
+    top_k: 2
+  - id: reranker
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      Select only the most relevant evidence for the question.
+      Return compact bullet points and keep source ids.
+    user_prompt_template: |-
+      Question:
+      {user_input}
+
+      Retrieved context:
+      {retrieved_context}
+    output_state_key: reranked_context
+    temperature: 0.0
+  - id: synthesiser
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      Answer using only the reranked context.
+      If evidence is insufficient, say that explicitly.
+    user_prompt_template: |-
+      Question:
+      {user_input}
+
+      Reranked context:
+      {reranked_context}
+
+      Provide a concise answer in 1-2 sentences.
+    output_state_key: final_answer
+    temperature: 0.0
+edges:
+  - from: query_analyser
+    to: retriever
+  - from: retriever
+    to: reranker
+  - from: reranker
+    to: synthesiser
+  - from: synthesiser
+    to: __end__
