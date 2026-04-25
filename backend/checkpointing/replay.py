@@ -13,6 +13,7 @@ from backend.budget.enforcer import BudgetEnforcer
 from backend.builder.api import GraphMetadata
 from backend.builder.compile import compile_to_langgraph
 from backend.graphspec import load_workflow_metadata
+from backend.runtime.artifacts import resolve_run_dir, update_run_manifest
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.errors import BuilderValidationError, ReplayError
 from backend.runtime.executor import RunResult, run_graph
@@ -130,7 +131,7 @@ def _history_app(metadata: GraphMetadata, checkpoint_path: Path, *, run_id: str)
             run_id=run_id,
             graph_name=metadata.name,
             run_dir=checkpoint_path.parent,
-            runs_root=checkpoint_path.parent.parent,
+            runs_root=checkpoint_path.parents[4],
             cancellation=None,
         ),
         gate_router_factory=_gate_router_factory(run_id, metadata.name),
@@ -148,7 +149,11 @@ def resolve_replay_boundary(
     at: str | None,
     runs_root: Path,
 ) -> ReplayBoundary:
-    checkpoint_path = runs_root / source_run_id / "checkpoints.db"
+    try:
+        source_run_dir = resolve_run_dir(runs_root, source_run_id)
+    except FileNotFoundError as exc:
+        raise ReplayError(f"run {source_run_id!r} has no checkpoints.db") from exc
+    checkpoint_path = source_run_dir / "checkpoints.db"
     if not checkpoint_path.exists():
         raise ReplayError(f"run {source_run_id!r} has no checkpoints.db")
 
@@ -270,6 +275,7 @@ def replay(
         "overrides": overrides or {},
     }
     (run.run_dir / "replay.json").write_text(json.dumps(replay_meta, indent=2), encoding="utf-8")
+    update_run_manifest(run.run_dir, {"replay": replay_meta})
     return ReplayResult(
         run=run,
         source_run_id=run_id,

@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import HTTPException, WebSocket
 
+from backend.runtime.artifacts import resolve_run_dir
 from backend.server.node_metrics import compute_node_metrics
 from backend.server.routes import list_runs_data, load_workflow
 
@@ -311,7 +312,11 @@ class LiveUpdateService:
         return "||".join(parts)
 
     def _run_detail_fingerprint(self, run_id: str) -> tuple[int, int] | None:
-        db_path = self.runs_root / run_id / "telemetry.db"
+        try:
+            run_dir = resolve_run_dir(self.runs_root, run_id)
+        except FileNotFoundError:
+            return None
+        db_path = run_dir / "telemetry.db"
         if not db_path.exists():
             return None
         try:

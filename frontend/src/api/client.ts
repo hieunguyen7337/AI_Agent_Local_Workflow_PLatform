@@ -15,6 +15,8 @@ import type {
   RestoreRollbackResponse,
   RollbackPreviewResponse,
   RollbackSnapshotsResponse,
+  StartRunRequest,
+  StartRunResponse,
   RunDetailResponse,
   RunSummary,
   Topology,
@@ -143,6 +145,22 @@ export async function restoreRollbackSnapshot(
 export async function fetchRuns(): Promise<RunSummary[]> {
   const r = await fetch(`${BASE}/api/runs`);
   if (!r.ok) throw new Error(`runs fetch ${r.status}`);
+  return r.json();
+}
+
+export async function startWorkflowRun(
+  workflow: string,
+  payload: StartRunRequest
+): Promise<StartRunResponse> {
+  const r = await fetch(`${BASE}/api/runs?workflow=${encodeURIComponent(workflow)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `run start ${r.status}`);
+  }
   return r.json();
 }
 

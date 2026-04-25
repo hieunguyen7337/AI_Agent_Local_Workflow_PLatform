@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.server import app as app_module
 from backend.server import routes
+from backend.runtime.artifacts import resolve_run_dir, run_dir_for_id
 from backend.telemetry.exporter import ensure_schema
 
 
@@ -24,7 +25,7 @@ def _upsert_run(
     latency_ms: float = 0.0,
     error: str | None = None,
 ) -> None:
-    run_dir = runs_root / run_id
+    run_dir = run_dir_for_id(runs_root, graph_name, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
     db_path = run_dir / "telemetry.db"
     ensure_schema(db_path)
@@ -46,7 +47,7 @@ def _insert_span(
     end_ns: int,
     node_id: str = "planner",
 ) -> None:
-    db_path = runs_root / run_id / "telemetry.db"
+    db_path = resolve_run_dir(runs_root, run_id) / "telemetry.db"
     ensure_schema(db_path)
     with sqlite3.connect(db_path) as con:
         row = con.execute(

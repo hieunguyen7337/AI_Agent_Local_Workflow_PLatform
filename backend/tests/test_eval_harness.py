@@ -12,6 +12,7 @@ from backend.evals.metrics import confidence_intervals, summarize
 from backend.providers import openai as oai
 from backend.providers import openrouter as orouter
 from backend.providers.openrouter import LLMResponse, Usage
+from backend.runtime.artifacts import resolve_run_dir
 
 
 class _Replies:
@@ -342,4 +343,4 @@ def test_subgraph_eval_scores_mapped_output_and_records_lineage(monkeypatch, tmp
     assert result["status"] == "ok"
     assert result["subgraphs"][0]["child_workflow"] == "linear_rag"
     assert Path(result["subgraphs"][0]["artifact_path"]).exists()
-    assert (runs_root / result["subgraphs"][0]["child_run_id"] / "parent_run.json").exists()
+    assert (resolve_run_dir(runs_root, result["subgraphs"][0]["child_run_id"]) / "parent_run.json").exists()

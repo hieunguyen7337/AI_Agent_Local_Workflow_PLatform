@@ -1,7 +1,7 @@
-# Local AI Workflow Platform - M5.5
+# Local AI Workflow Platform - M5.6
 
 A local-first platform to author, run, visualize, and iterate on AI workflows.
-M5.5 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in the UI, and compiled into the existing LangGraph runtime with YAML-only workflow loading, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs, richer parent/child subgraph review, multi-proposal optimization reports, and audited rollback restore:
+M5.6 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in the UI, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs, richer parent/child subgraph review, multi-proposal optimization reports, and audited rollback restore:
 
 ## Vision
 
@@ -28,7 +28,7 @@ Each workflow should be built from a simple source-of-truth file that is easy fo
 - Workflow defaults: `coder_tester` -> OpenRouter `minimax/minimax-m2.7`; `linear_rag`, `supervisor_loop`, and `dispatch_aggregate` -> OpenAI `gpt-4o-mini`
 - Pricing: provider/model rates loaded from `prices.yaml`; budget correctness does not depend on provider stream-abort support
 
-See [docs/graphspec_decision.md](docs/graphspec_decision.md) for the source-of-truth decision, [claude_full_plan.md](claude_full_plan.md) for the base architecture, and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
+See [docs/graphspec_decision.md](docs/graphspec_decision.md) for the source-of-truth decision, [docs/run_artifacts.md](docs/run_artifacts.md) for how to inspect run files, [claude_full_plan.md](claude_full_plan.md) for the base architecture, and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
 
 ## Full Setup (Windows PowerShell)
 
@@ -71,7 +71,7 @@ npm install
 cd ..
 ```
 
-## Verify M5.5 End-to-End
+## Verify M5.6 End-to-End
 
 From repo root (Windows commands shown):
 
@@ -207,7 +207,7 @@ Terminal 2 (frontend on `127.0.0.1:5173`):
 
 ```powershell
 cd <repo-root>\frontend
-npm run dev -- --host 127.0.0.1 --port 5173
+npm run dev
 ```
 
 Open `http://127.0.0.1:5173`.
@@ -217,6 +217,7 @@ Expected behavior:
 - graph renders for selected workflow
 - selecting a graph node opens source metadata in the inspector
 - selecting a subgraph node can open the referenced child graph without changing the parent workflow selector
+- the sidebar run form starts the selected workflow from user input and selects the created run
 - source inspector shows raw YAML, validation status, mutation proposal diffs, proposal eval summaries, and apply results
 - the Propose tab can generate multiple optimization candidates, evaluate them under a shared cost cap, and recommend a candidate for human review
 - the Rollback tab lists apply/restore snapshots, previews diffs, and restores selected YAML after confirmation
@@ -369,10 +370,11 @@ Expected behavior:
 
 ## Run Artifacts
 
-Each run is written to:
+Execution runs are written to workflow/date folders with readable run ids:
 
 ```text
-runs/<run_id>/
+runs/workflows/<workflow>/<YYYYMMDD>/<run_id>/
+  run_manifest.json
   telemetry.db
   spans.jsonl
   checkpoints.db
@@ -382,6 +384,9 @@ runs/<run_id>/
   approval_decision.json
   approval_resume.json
 ```
+
+Run ids use `run_YYYYMMDDTHHMMSSZ_<workflow>_<8hex>`, for example `run_20260425T091230Z_coder_tester_a1b2c3d4`.
+Open `run_manifest.json` first for a summary and artifact paths. `telemetry.db` is a SQLite database for run/spans inspection; `checkpoints.db` is LangGraph replay/resume state. See [docs/run_artifacts.md](docs/run_artifacts.md) for DB Browser, `sqlite3`, and Python inspection commands.
 
 Main eval and audit outputs:
 
@@ -398,7 +403,7 @@ runs/spec_audit/<workflow>/<timestamp>/audit.json
 runs/spec_audit/<workflow>/<timestamp>/original.yaml
 ```
 
-## M5.5 Limits (by design)
+## M5.6 Limits (by design)
 
 - Six reference workflows only (`coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, `rag_subgraph_wrapper`)
 - Two direct providers only (`openrouter`, `openai`)
@@ -409,7 +414,6 @@ runs/spec_audit/<workflow>/<timestamp>/original.yaml
 - approval resume uses forked continuation runs; in-place continuation of the original run is intentionally avoided
 - approval workflows can be evaluated with fixture-provided decisions, but approval-containing child subgraphs are still deferred
 - subgraph UI renders collapsed parent nodes with read-only child graph inspection; full inline graph expansion/editing is still deferred
-- JSON graph import/export is still deferred until the YAML + `GraphSpec` contract stabilizes
 - Branch outputs in `dispatch_aggregate` remain fixed named state keys rather than a generic map-reduce collection
 - Replay stays within the same workflow id and still assumes stable node ids for the selected replay point
 - Generic replay migration covers additive/removal schema changes; rename-level replay migrations need a future YAML/spec-aware compatibility path

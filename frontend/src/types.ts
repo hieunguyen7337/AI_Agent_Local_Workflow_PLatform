@@ -226,6 +226,31 @@ export interface RunSummary {
   cost_usd: number;
   latency_ms: number;
   error: string | null;
+  run_dir?: string;
+  telemetry_db?: string;
+  checkpoints_db?: string;
+  spans_jsonl?: string;
+  manifest?: string;
+}
+
+export interface StartRunRequest {
+  input: string;
+  expected?: string;
+}
+
+export interface StartRunResponse {
+  run_id: string;
+  graph_name: string;
+  status: string;
+  cost_usd: number;
+  latency_ms: number;
+  error: string | null;
+  run_dir: string;
+  telemetry_db?: string;
+  checkpoints_db?: string;
+  spans_jsonl?: string;
+  manifest?: string;
+  final_state: Record<string, unknown>;
 }
 
 export interface ApprovalSummary {

@@ -1,6 +1,6 @@
 # Future Scope
 
-This file tracks deliberately deferred work beyond M5.5. It should stay aligned with the product vision:
+This file tracks deliberately deferred work beyond M5.6. It should stay aligned with the product vision:
 
 - YAML `GraphSpec` files are the simple source of truth for workflows.
 - LLMs should be able to read, analyze, propose mutations, and iterate on that source of truth.
@@ -25,23 +25,24 @@ Entries should be pruned or moved when they graduate into implemented milestones
 - **Multi-proposal optimization loop** - the app can generate multiple YAML mutation candidates, evaluate them under a shared cost cap, rank them, and recommend one for human review.
 - **Rollback restore flow** - rollback snapshots can be listed, previewed, and restored after human confirmation, with a new audit record for restore actions.
 - **YAML-only workflow loading** - CLI, replay, evals, API, graph export, and tests load canonical YAML specs without Python workflow module fallback. The Python builder remains only as an internal metadata/compiler helper.
+- **Structured run artifacts** - execution runs are stored by workflow/date with readable run ids, manifests, artifact paths in the API/UI, and documentation for inspecting JSONL and SQLite files.
 
-## Next product milestone - JSON graph import/export
+## Next product milestone - nested approval subgraphs
 
-- **Export JSON graph specs** - expose a stable JSON representation of validated `GraphSpec` for external tooling, archival, and deterministic machine review.
-- **Import JSON graph specs** - accept JSON as an interchange format, validate it through the same `GraphSpec` contract, and convert it back to canonical YAML before apply.
-- **Round-trip checks** - prove YAML -> `GraphSpec` -> JSON -> `GraphSpec` -> YAML preserves workflow identity, topology, node metadata, budgets, loops, routes, approvals, and subgraph mappings.
-- **UI affordance** - add read-only JSON export first; defer imported JSON apply until validation, diff, and audit behavior match YAML proposal/apply safety.
+- **Parent/child pause semantics** - define how a parent run reports status when a child subgraph pauses on an approval node.
+- **Decision routing** - decide whether approval decisions are issued against the child run only, the parent run, or a coordinated parent/child decision endpoint.
+- **Continuation lineage** - preserve immutable source runs while linking parent run, child pending run, decision artifact, and continuation run clearly.
+- **UI review flow** - let reviewers navigate from parent subgraph node to the child approval prompt, decision state, and continuation evidence without changing the YAML source-of-truth model.
 
 ## Workflow capabilities
 
-- **Nested approval subgraphs** - child workflows with `approval` nodes remain deferred until parent/child pause and resume semantics are explicit.
 - **Inline subgraph editing** - child graph inspection is read-only; editing still happens through the YAML proposal/apply loop.
+- **Reusable workflow library** - add conventions for organizing many YAML workflow specs, examples, and reusable pipeline templates without introducing a second authoring format.
 
 ## Technical debt and compatibility
 
 - **CLI `--set` deep overrides** - M1 supports one level deep only (`--set node.field=value`). Add deeper override syntax only when real use cases appear.
-- **Spec patch format** - current proposals use full YAML rewrites plus unified diffs. Decide later whether accepted changes should use JSON Patch or constrained graph-edit operations.
+- **Spec patch format** - current proposals use full YAML rewrites plus unified diffs. If smaller proposal payloads become necessary, design YAML-native constrained edit operations instead of adding another source format.
 - **OTEL GenAI semconv churn** - attribute names are isolated in `telemetry/genai_attrs.py`; update only when the upstream convention stabilizes.
 
 ## Explicitly rejected

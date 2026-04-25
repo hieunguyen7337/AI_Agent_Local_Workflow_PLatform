@@ -5,6 +5,7 @@ import RunList from "./components/RunList";
 import RunDetail from "./components/RunDetail";
 import ApprovalWorkbench from "./components/ApprovalWorkbench";
 import SpecInspector from "./components/SpecInspector";
+import RunStarter from "./components/RunStarter";
 import { fetchNodeMetrics, fetchTopology, fetchWorkflowSpec } from "./api/client";
 import { useLiveUpdates } from "./live/useLiveUpdates";
 
@@ -99,6 +100,7 @@ export default function App() {
           />
         </div>
         <div className="border-b flex-none">
+          <RunStarter workflow={workflow} onStarted={setSelectedRun} />
           <div className="px-3 py-2 text-xs uppercase text-gray-500">Recent runs</div>
           <RunList workflow={workflow} onSelect={(r) => setSelectedRun(r.run_id)} selected={selectedRun} />
         </div>

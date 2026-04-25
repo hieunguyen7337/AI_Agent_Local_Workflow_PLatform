@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from backend.builder.nodes import SubgraphNodeConfig
+from backend.runtime.artifacts import update_run_manifest
 from backend.runtime.errors import SubgraphError
 from backend.runtime.state import WorkflowState
 
@@ -60,12 +61,14 @@ def make_subgraph_node(
 
         child_lineage_path = child_result.run_dir / "parent_run.json"
         child_lineage_path.write_text(json.dumps(lineage, indent=2), encoding="utf-8")
+        update_run_manifest(child_result.run_dir, {"parent_run": lineage})
 
         artifacts = dict(state.get("artifacts", {}))
         subgraphs = list(artifacts.get("subgraphs", []))
         lineage["artifact_path"] = lineage_path.as_posix()
         subgraphs.append(lineage)
         artifacts["subgraphs"] = subgraphs
+        update_run_manifest(run_dir, {"subgraphs": subgraphs})
         output_update["artifacts"] = artifacts
 
         if child_result.status != "ok":

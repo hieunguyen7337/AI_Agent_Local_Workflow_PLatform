@@ -5,11 +5,13 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 from backend.server import routes
 from backend.server.app import app
+from backend.runtime.artifacts import resolve_run_dir, run_dir_for_id
 from backend.telemetry.exporter import ensure_schema
 from backend.providers.base import LLMResponse, Usage
 from backend.graphspec import graph_spec_to_metadata, load_graph_spec
@@ -17,7 +19,7 @@ from backend.runtime.executor import run_graph
 
 
 def _write_single_run(runs_root: Path) -> None:
-    run_dir = runs_root / "run_api"
+    run_dir = run_dir_for_id(runs_root, "coder_tester", "run_api")
     run_dir.mkdir(parents=True, exist_ok=True)
     db_path = run_dir / "telemetry.db"
     ensure_schema(db_path)
@@ -84,6 +86,49 @@ def test_graph_node_metrics_rejects_bad_limit():
     client = TestClient(app)
     resp = client.get("/api/graph/coder_tester/node-metrics?limit=0")
     assert resp.status_code == 400
+
+
+def test_start_run_endpoint_runs_selected_workflow(tmp_path: Path, monkeypatch):
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    captured = {}
+
+    def _fake_run_graph(metadata, **kwargs):
+        captured["metadata"] = metadata
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            run_id="run_api_start",
+            graph_name=metadata.name,
+            status="ok",
+            error=None,
+            cost_usd=0.01,
+            latency_ms=12.0,
+            run_dir=run_dir_for_id(runs_root, metadata.name, "run_api_start"),
+            final_state={"final_answer": "done"},
+        )
+
+    monkeypatch.setattr(routes, "run_graph", _fake_run_graph)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/runs?workflow=linear_rag",
+        json={"input": "What is the refund window?", "expected": "30 days"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run_id"] == "run_api_start"
+    assert body["graph_name"] == "linear_rag"
+    assert body["final_state"]["final_answer"] == "done"
+    assert captured["metadata"].name == "linear_rag"
+    assert captured["kwargs"]["user_input"] == "What is the refund window?"
+    assert captured["kwargs"]["expected"] == "30 days"
+    assert captured["kwargs"]["runs_root"] == runs_root
+
+
+def test_start_run_missing_workflow_returns_404():
+    client = TestClient(app)
+    resp = client.post("/api/runs?workflow=not_a_workflow", json={"input": "hello"})
+    assert resp.status_code == 404
 
 
 def test_get_graph_linear_rag_shape():
@@ -528,7 +573,7 @@ def test_approval_decision_approved_forks_continuation(monkeypatch, tmp_path: Pa
     assert resume["approval_node_id"] == "human_review"
     assert resume["decision"] == "approved"
 
-    decision_path = runs_root / pending.run_id / "approval_decision.json"
+    decision_path = resolve_run_dir(runs_root, pending.run_id) / "approval_decision.json"
     decision = json.loads(decision_path.read_text(encoding="utf-8"))
     assert decision["reviewer"] == "tester"
     assert decision["comment"] == "Looks good."
@@ -654,7 +699,7 @@ def test_approval_decision_non_pending_run_returns_400(monkeypatch, tmp_path: Pa
     runs_root = tmp_path / "runs"
     runs_root.mkdir()
     _write_single_run(runs_root)
-    approval_path = runs_root / "run_api" / "approval.json"
+    approval_path = resolve_run_dir(runs_root, "run_api") / "approval.json"
     approval_path.write_text(
         json.dumps(
             {
@@ -724,10 +769,11 @@ def test_run_detail_ignores_malformed_subgraph_lineage(monkeypatch, tmp_path: Pa
     runs_root = tmp_path / "runs"
     runs_root.mkdir()
     _write_single_run(runs_root)
-    subgraphs = runs_root / "run_api" / "subgraphs"
+    run_dir = resolve_run_dir(runs_root, "run_api")
+    subgraphs = run_dir / "subgraphs"
     subgraphs.mkdir()
     (subgraphs / "bad.json").write_text("{not json", encoding="utf-8")
-    (runs_root / "run_api" / "parent_run.json").write_text("{not json", encoding="utf-8")
+    (run_dir / "parent_run.json").write_text("{not json", encoding="utf-8")
     monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
 
     client = TestClient(app)

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import time
-import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -24,6 +23,7 @@ from backend.builder.nodes import (
     TesterNodeConfig,
 )
 from backend.runtime.cancellation import CancellationController
+from backend.runtime.artifacts import make_run_id, run_dir_for_id, write_run_manifest
 from backend.runtime.errors import (
     BudgetExceededError,
     BuilderValidationError,
@@ -197,8 +197,8 @@ def run_graph(
     start_at_node: str | None = None,
     cancellation: CancellationController | None = None,
 ) -> RunResult:
-    run_id = run_id or f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-    run_dir = runs_root / run_id
+    run_id = run_id or make_run_id(metadata.name)
+    run_dir = run_dir_for_id(runs_root, metadata.name, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     tracer = init_tracer(run_dir)
@@ -210,6 +210,13 @@ def run_graph(
     enforcer.start()
 
     started_ns = time.time_ns()
+    write_run_manifest(
+        run_dir,
+        workflow=metadata.name,
+        run_id=run_id,
+        started_ns=started_ns,
+        status="running",
+    )
     record_run_start(
         run_dir / "telemetry.db",
         run_id=run_id,
@@ -319,6 +326,15 @@ def run_graph(
             status=status,
             cost_usd=enforcer.cost_accum_usd,
             latency_ms=enforcer.latency_ms(),
+            error=error,
+        )
+        write_run_manifest(
+            run_dir,
+            workflow=metadata.name,
+            run_id=run_id,
+            started_ns=started_ns,
+            ended_ns=ended_ns,
+            status=status,
             error=error,
         )
 

@@ -8,6 +8,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from backend.runtime.artifacts import iter_run_dirs
 
 CACHE_TTL_SECONDS = 2.0
 _CACHE_LOCK = threading.Lock()
@@ -42,9 +43,7 @@ def _select_recent_runs(*, runs_root: Path, workflow: str, limit: int) -> list[d
     if not runs_root.exists():
         return []
     rows: list[dict] = []
-    for d in runs_root.iterdir():
-        if not d.is_dir():
-            continue
+    for d in iter_run_dirs(runs_root):
         db = d / "telemetry.db"
         if not db.exists():
             continue
@@ -146,4 +145,3 @@ def _retries_per_run(run_counts: dict[str, int], run_ids: list[str]) -> list[int
     for rid in run_ids:
         out.append(max(0, int(run_counts.get(rid, 0)) - 1))
     return out
-

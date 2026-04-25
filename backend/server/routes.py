@@ -34,6 +34,8 @@ from backend.graphspec import (
 )
 from backend.graphspec.loader import WORKFLOW_SPECS_ROOT
 from backend.providers.base import ProviderError
+from backend.runtime.artifacts import artifact_paths, iter_run_dirs, resolve_run_dir
+from backend.runtime.executor import run_graph
 from backend.server.node_metrics import compute_node_metrics
 
 router = APIRouter()
@@ -71,6 +73,11 @@ class OptimizeProposalsRequest(BaseModel):
 
 class RollbackRestoreRequest(BaseModel):
     accepted_by: str | None = None
+
+
+class StartRunRequest(BaseModel):
+    input: str = Field(min_length=1)
+    expected: str | None = None
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -457,6 +464,27 @@ def list_runs(limit: int = 50) -> list[dict]:
     return list_runs_data(runs_root=RUNS_ROOT, limit=limit)
 
 
+@router.post("/api/runs")
+def start_run(request: StartRunRequest, workflow: str) -> dict:
+    metadata = load_workflow(workflow)
+    result = run_graph(
+        metadata,
+        user_input=request.input,
+        expected=request.expected,
+        runs_root=RUNS_ROOT,
+    )
+    return {
+        "run_id": result.run_id,
+        "graph_name": result.graph_name,
+        "status": result.status,
+        "cost_usd": result.cost_usd,
+        "latency_ms": result.latency_ms,
+        "error": result.error,
+        **artifact_paths(result.run_dir),
+        "final_state": result.final_state,
+    }
+
+
 @router.get("/api/approvals")
 def list_approvals(status: str = "pending") -> list[dict]:
     if status not in {"pending", "decided", "all"}:
@@ -498,7 +526,10 @@ def list_approval_data(*, runs_root: Path, status: str = "pending") -> list[dict
     if not runs_root.exists():
         return []
     approvals: list[dict[str, Any]] = []
-    for path in runs_root.glob("*/approval.json"):
+    for run_dir in iter_run_dirs(runs_root):
+        path = run_dir / "approval.json"
+        if not path.exists():
+            continue
         try:
             approval = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -527,9 +558,7 @@ def list_runs_data(*, runs_root: Path, limit: int = 50) -> list[dict[str, Any]]:
     if not runs_root.exists():
         return []
     out: list[dict[str, Any]] = []
-    for d in runs_root.iterdir():
-        if not d.is_dir():
-            continue
+    for d in iter_run_dirs(runs_root):
         db = d / "telemetry.db"
         if not db.exists():
             continue
@@ -550,6 +579,7 @@ def list_runs_data(*, runs_root: Path, limit: int = 50) -> list[dict[str, Any]]:
                             "cost_usd": r[5],
                             "latency_ms": r[6],
                             "error": r[7],
+                            **artifact_paths(d),
                         }
                     )
         except sqlite3.OperationalError:
@@ -567,7 +597,10 @@ def get_run(run_id: str) -> dict:
 
 
 def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
-    run_dir = runs_root / run_id
+    try:
+        run_dir = resolve_run_dir(runs_root, run_id)
+    except FileNotFoundError:
+        return None
     db = run_dir / "telemetry.db"
     if not db.exists():
         return None
@@ -621,6 +654,7 @@ def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
         "latency_ms": run_row[6],
         "error": run_row[7],
         "spans": spans,
+        **artifact_paths(run_dir),
     }
     approval_path = run_dir / "approval.json"
     if approval_path.exists():

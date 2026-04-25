@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from backend.server.node_metrics import compute_node_metrics
+from backend.runtime.artifacts import run_dir_for_id
 from backend.telemetry.exporter import ensure_schema
 
 
@@ -61,10 +62,10 @@ def _write_run(
 def test_compute_node_metrics_aggregate_and_retries(tmp_path: Path):
     runs_root = tmp_path / "runs"
     runs_root.mkdir()
-    run1 = runs_root / "run_1"
-    run2 = runs_root / "run_2"
-    run1.mkdir()
-    run2.mkdir()
+    run1 = run_dir_for_id(runs_root, "coder_tester", "run_1")
+    run2 = run_dir_for_id(runs_root, "coder_tester", "run_2")
+    run1.mkdir(parents=True)
+    run2.mkdir(parents=True)
 
     _write_run(
         run1,
@@ -127,4 +128,3 @@ def test_compute_node_metrics_aggregate_and_retries(tmp_path: Path):
     assert gate["runs_considered"] == 2
     assert gate["invocations"] == 0
     assert gate["fail_pct"] == 0.0
-

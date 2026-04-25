@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -23,6 +24,7 @@ from backend.providers.base import LLMResponse, Usage
 from backend.graphspec import graph_spec_to_metadata, load_graph_spec
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
+from backend.runtime.artifacts import resolve_run_dir
 
 
 class _Replies:
@@ -79,6 +81,14 @@ def test_happy_path_passes_gate(monkeypatch, tmp_runs_root):
     assert result.status == "ok"
     assert result.final_state.get("tester_verdict") is True
     assert result.final_state.get("tester_mode") == "llm_judge"
+    assert re.match(r"^run_\d{8}T\d{6}Z_ct_test_[0-9a-f]{8}$", result.run_id)
+    assert result.run_dir == resolve_run_dir(tmp_runs_root, result.run_id)
+    assert result.run_dir.parent.name == result.run_id[:12].removeprefix("run_")
+    manifest = json.loads((result.run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["workflow"] == "ct_test"
+    assert manifest["run_id"] == result.run_id
+    assert manifest["status"] == "ok"
+    assert manifest["artifacts"]["telemetry_db"].endswith("/telemetry.db")
 
 
 def test_loop_then_pass(monkeypatch, tmp_runs_root):
@@ -293,4 +303,4 @@ def test_subgraph_node_executes_child_run_and_writes_lineage(monkeypatch, tmp_ru
     assert lineage["child_workflow"] == "linear_rag"
     assert lineage["status"] == "ok"
     assert lineage["outputs"] == {"final_answer": "rag_answer"}
-    assert (tmp_runs_root / lineage["child_run_id"] / "parent_run.json").exists()
+    assert (resolve_run_dir(tmp_runs_root, lineage["child_run_id"]) / "parent_run.json").exists()

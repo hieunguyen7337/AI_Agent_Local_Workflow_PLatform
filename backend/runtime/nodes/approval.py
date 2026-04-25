@@ -10,6 +10,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from backend.builder.api import END as BUILDER_END
 from backend.builder.nodes import ApprovalNodeConfig
+from backend.runtime.artifacts import update_run_manifest
 from backend.runtime.errors import PendingApprovalError, RoutingError
 from backend.runtime.state import WorkflowState
 from backend.telemetry.genai_attrs import node_attrs
@@ -53,6 +54,7 @@ def make_approval_node(
         )
         with tracer.start_as_current_span(f"node.{cfg.id}", attributes=attrs) as span:
             _write_approval(run_dir, approval)
+            update_run_manifest(run_dir, {"approval": approval})
             span.set_status(Status(StatusCode.OK))
             raise PendingApprovalError(approval=approval, state_update=update)
 

@@ -10,6 +10,7 @@ from typing import Literal
 
 from backend.graphspec import load_workflow_metadata
 from backend.builder.api import GraphMetadata
+from backend.runtime.artifacts import resolve_run_dir, update_run_manifest
 from backend.runtime.executor import RunResult, run_graph
 
 
@@ -52,7 +53,10 @@ def decide_approval(
     runs_root: Path = Path("runs"),
     metadata: GraphMetadata | None = None,
 ) -> ApprovalDecisionResult:
-    source_run_dir = runs_root / run_id
+    try:
+        source_run_dir = resolve_run_dir(runs_root, run_id)
+    except FileNotFoundError as exc:
+        raise ApprovalNotFoundError(f"pending approval for run {run_id!r} not found") from exc
     approval_path = source_run_dir / "approval.json"
     decision_path = source_run_dir / "approval_decision.json"
     if not approval_path.exists():
@@ -98,6 +102,7 @@ def decide_approval(
         json.dumps(resume_artifact, indent=2),
         encoding="utf-8",
     )
+    update_run_manifest(continuation.run_dir, {"approval_resume": resume_artifact})
 
     decision_artifact = {
         "source_run_id": run_id,
@@ -114,6 +119,7 @@ def decide_approval(
         "continuation_run_dir": continuation.run_dir.as_posix(),
     }
     decision_path.write_text(json.dumps(decision_artifact, indent=2), encoding="utf-8")
+    update_run_manifest(source_run_dir, {"approval_decision": decision_artifact})
 
     return ApprovalDecisionResult(
         source_run_id=run_id,

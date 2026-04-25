@@ -67,6 +67,14 @@ export default function RunDetail({
       {run.error && (
         <div className="p-2 rounded bg-red-50 text-red-800 text-xs whitespace-pre-wrap">{run.error}</div>
       )}
+      <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 space-y-1">
+        <div className="font-medium">Artifacts</div>
+        <ArtifactPath label="Run dir" value={run.run_dir} />
+        <ArtifactPath label="Manifest" value={run.manifest} />
+        <ArtifactPath label="Telemetry DB" value={run.telemetry_db} />
+        <ArtifactPath label="Checkpoints DB" value={run.checkpoints_db} />
+        <ArtifactPath label="Spans JSONL" value={run.spans_jsonl} />
+      </div>
       {run.approval && (
         <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
           <div className="font-medium">Pending approval</div>
@@ -247,6 +255,16 @@ export default function RunDetail({
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ArtifactPath({ label, value }: { label: string; value?: string }) {
+  if (!value) return null;
+  return (
+    <div>
+      <div className="uppercase text-slate-500">{label}</div>
+      <div className="break-all font-mono text-[11px]">{value}</div>
     </div>
   );
 }

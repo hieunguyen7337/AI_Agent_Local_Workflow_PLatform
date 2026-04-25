@@ -26,7 +26,7 @@ Current pressure points now directly affect the core product loop:
 - LLMs need to propose graph and node-config changes without editing Python code.
 - Humans need frontend graph views backed by full node metadata.
 - Replay, evals, and optimization need stable graph/config mutation boundaries.
-- JSON import/export and UI editing need a schema-backed contract.
+- UI editing and source inspection need a schema-backed contract around the YAML source of truth.
 
 ## Rationale
 
@@ -50,7 +50,6 @@ Do not add a custom DSL. YAML plus `GraphSpec` is the first declarative layer.
 
 Revisit the spec shape if one of these becomes active scope:
 
-- JSON import/export must become a stable public API.
 - Structural graph mutations go beyond current node/edge/loop patterns.
 - Reusable subgraphs need a serializable composition boundary.
 - Frontend editing needs optimistic validation and patch previews.

@@ -38,7 +38,7 @@ export default function RunList({
   if (runs.length === 0) {
     return (
       <div className="p-4 text-sm text-gray-500">
-        No runs yet for <code>{workflow}</code>. Start one with <code>workflow run {workflow} --input ...</code>.
+        No runs yet for <code>{workflow}</code>. Use the run form above to start one.
       </div>
     );
   }
