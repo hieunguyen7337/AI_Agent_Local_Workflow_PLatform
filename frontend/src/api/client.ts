@@ -1,12 +1,21 @@
 import type {
   ApplyProposalRequest,
   ApplyProposalResponse,
+  ApprovalDecisionRequest,
+  ApprovalDecisionResponse,
   ApprovalSummary,
   MutationProposalRequest,
   MutationProposalResponse,
   NodeMetricsResponse,
+  OptimizeProposalsRequest,
+  OptimizeProposalsResponse,
   ProposalEvaluationRequest,
   ProposalEvaluationResponse,
+  RestoreRollbackRequest,
+  RestoreRollbackResponse,
+  RollbackPreviewResponse,
+  RollbackSnapshotsResponse,
+  RunDetailResponse,
   RunSummary,
   Topology,
   WorkflowSpecResponse,
@@ -62,6 +71,27 @@ export async function evaluateSpecProposal(
   return r.json();
 }
 
+export async function optimizeSpecProposals(
+  workflow: string,
+  payload: OptimizeProposalsRequest
+): Promise<OptimizeProposalsResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}/optimize-proposals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      candidate_count: payload.candidate_count ?? 3,
+      n_per_fixture: payload.n_per_fixture ?? 1,
+      max_cost_usd: payload.max_cost_usd ?? 5.0,
+    }),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `proposal optimization ${r.status}`);
+  }
+  return r.json();
+}
+
 export async function applySpecProposal(
   workflow: string,
   payload: ApplyProposalRequest
@@ -78,19 +108,67 @@ export async function applySpecProposal(
   return r.json();
 }
 
+export async function fetchRollbackSnapshots(workflow: string): Promise<RollbackSnapshotsResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}/rollback-snapshots`);
+  if (!r.ok) throw new Error(`rollback snapshots fetch ${r.status}`);
+  return r.json();
+}
+
+export async function fetchRollbackPreview(
+  workflow: string,
+  snapshotId: string
+): Promise<RollbackPreviewResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}/rollback-snapshots/${snapshotId}/preview`);
+  if (!r.ok) throw new Error(`rollback preview fetch ${r.status}`);
+  return r.json();
+}
+
+export async function restoreRollbackSnapshot(
+  workflow: string,
+  snapshotId: string,
+  payload: RestoreRollbackRequest = {}
+): Promise<RestoreRollbackResponse> {
+  const r = await fetch(`${BASE}/api/spec/${workflow}/rollback-snapshots/${snapshotId}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `rollback restore ${r.status}`);
+  }
+  return r.json();
+}
+
 export async function fetchRuns(): Promise<RunSummary[]> {
   const r = await fetch(`${BASE}/api/runs`);
   if (!r.ok) throw new Error(`runs fetch ${r.status}`);
   return r.json();
 }
 
-export async function fetchApprovals(): Promise<ApprovalSummary[]> {
-  const r = await fetch(`${BASE}/api/approvals`);
+export async function fetchApprovals(status: "pending" | "decided" | "all" = "pending"): Promise<ApprovalSummary[]> {
+  const r = await fetch(`${BASE}/api/approvals?status=${status}`);
   if (!r.ok) throw new Error(`approvals fetch ${r.status}`);
   return r.json();
 }
 
-export async function fetchRun(runId: string): Promise<any> {
+export async function decideApproval(
+  runId: string,
+  payload: ApprovalDecisionRequest
+): Promise<ApprovalDecisionResponse> {
+  const r = await fetch(`${BASE}/api/approvals/${runId}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `approval decision ${r.status}`);
+  }
+  return r.json();
+}
+
+export async function fetchRun(runId: string): Promise<RunDetailResponse> {
   const r = await fetch(`${BASE}/api/runs/${runId}`);
   if (!r.ok) throw new Error(`run fetch ${r.status}`);
   return r.json();

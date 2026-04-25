@@ -20,6 +20,7 @@ from backend.builder.nodes import (
     NodeConfig,
     RetrieverNodeConfig,
     RouterNodeConfig,
+    SubgraphNodeConfig,
     TesterNodeConfig,
 )
 from backend.runtime.cancellation import CancellationController
@@ -36,6 +37,7 @@ from backend.runtime.nodes.gate import make_gate_passthrough, make_gate_router
 from backend.runtime.nodes.llm import make_llm_node
 from backend.runtime.nodes.retriever import make_retriever_node
 from backend.runtime.nodes.router import make_router_dispatcher, make_router_passthrough
+from backend.runtime.nodes.subgraph import make_subgraph_node
 from backend.runtime.nodes.tester import make_tester_node
 from backend.runtime.state import WorkflowState, new_state
 from backend.telemetry.exporter import record_run_end, record_run_start
@@ -69,6 +71,7 @@ def _node_factory(
     run_id: str,
     graph_name: str,
     run_dir: Path,
+    runs_root: Path,
     cancellation: CancellationController | None,
 ):
     def _on_cost(usd: float) -> None:
@@ -106,6 +109,15 @@ def _node_factory(
             return make_gate_passthrough(cfg, loop, run_id=run_id, graph_name=graph_name)
         elif isinstance(cfg, RouterNodeConfig):
             return make_router_passthrough(cfg, run_id=run_id, graph_name=graph_name)
+        elif isinstance(cfg, SubgraphNodeConfig):
+            base = make_subgraph_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                runs_root=runs_root,
+                on_cost=_on_cost,
+            )
         else:
             raise TypeError(f"Unknown node kind: {type(cfg).__name__}")
 
@@ -217,6 +229,7 @@ def run_graph(
             run_id=run_id,
             graph_name=metadata.name,
             run_dir=run_dir,
+            runs_root=runs_root,
             cancellation=cancellation,
         ),
         gate_router_factory=_gate_router_factory(run_id, metadata.name),

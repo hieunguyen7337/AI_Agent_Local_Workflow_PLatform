@@ -9,6 +9,7 @@ import yaml
 from backend.evals.fixtures import load_fixtures
 from backend.evals.harness import run_eval
 from backend.evals.metrics import confidence_intervals, summarize
+from backend.providers import openai as oai
 from backend.providers import openrouter as orouter
 from backend.providers.openrouter import LLMResponse, Usage
 
@@ -66,6 +67,8 @@ def test_load_fixtures(tmp_path: Path):
                     "input": "do b",
                     "expected": "result b",
                     "test_code": "assert True",
+                    "approval_decision": "approved",
+                    "approval_comment": "ok",
                     "meta": {"tag": "x"},
                 },
             ]
@@ -76,6 +79,8 @@ def test_load_fixtures(tmp_path: Path):
     assert fxs[0].id == "a"
     assert fxs[1].meta == {"tag": "x"}
     assert fxs[1].test_code == "assert True"
+    assert fxs[1].approval_decision == "approved"
+    assert fxs[1].approval_comment == "ok"
 
 
 def test_end_to_end_mini_eval(monkeypatch, tmp_path: Path):
@@ -199,3 +204,142 @@ def test_eval_uses_sandbox_when_test_code_present(monkeypatch, tmp_path: Path):
     assert out["overall"]["total_runs"] == 1
     assert out["overall"]["passes"] == 1
     assert len(calls) == 2
+
+
+def test_approval_eval_approved_and_rejected_paths(monkeypatch, tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    fx_path = tmp_path / "approval_fixtures.yaml"
+    fx_path.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "id": "approved",
+                    "input": "include human approved",
+                    "expected": "human approved",
+                    "approval_decision": "approved",
+                },
+                {
+                    "id": "rejected",
+                    "input": "reject this",
+                    "expected": "",
+                    "approval_decision": "rejected",
+                },
+            ]
+        )
+    )
+
+    calls: list[str] = []
+
+    def _openai_reply(**kwargs):
+        user = kwargs["messages"][-1]["content"]
+        calls.append(user)
+        if "include human approved" in user:
+            return LLMResponse(text="draft with human approved", usage=Usage(1, 1), model="gpt-4o-mini")
+        if "Approved draft:" in user:
+            return LLMResponse(text="final human approved", usage=Usage(1, 1), model="gpt-4o-mini")
+        if "reject this" in user:
+            return LLMResponse(text="draft to reject", usage=Usage(1, 1), model="gpt-4o-mini")
+        raise AssertionError(f"unexpected OpenAI call: {user}")
+
+    monkeypatch.setattr(oai, "stream_openai", _openai_reply)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    out = run_eval(
+        workflow="approval_review",
+        n_per_fixture=1,
+        fixtures_path=fx_path,
+        runs_root=runs_root,
+        output_path=tmp_path / "eval_approval.json",
+    )
+
+    assert out["overall"]["total_runs"] == 2
+    assert out["overall"]["passes"] == 2
+    assert out["approval_path_coverage"] == {"approved": 1, "rejected": 1}
+    approved, rejected = out["results"]
+    assert approved["source_run_id"] != approved["continuation_run_id"]
+    assert approved["run_id"] == approved["continuation_run_id"]
+    assert approved["approval_decision"] == "approved"
+    assert Path(approved["decision_artifact"]).exists()
+    assert Path(approved["approval_resume_artifact"]).exists()
+    assert rejected["approval_decision"] == "rejected"
+    assert rejected["pass"] is True
+    finalizer_calls = [call for call in calls if "Approved draft:" in call]
+    assert len(finalizer_calls) == 1
+
+
+def test_approval_eval_missing_decision_fails_clearly(monkeypatch, tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    fx_path = tmp_path / "approval_fixtures.yaml"
+    fx_path.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "id": "missing_decision",
+                    "input": "needs review",
+                    "expected": "anything",
+                }
+            ]
+        )
+    )
+
+    def _openai_reply(**kwargs):
+        return LLMResponse(text="draft", usage=Usage(1, 1), model="gpt-4o-mini")
+
+    monkeypatch.setattr(oai, "stream_openai", _openai_reply)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    out = run_eval(
+        workflow="approval_review",
+        n_per_fixture=1,
+        fixtures_path=fx_path,
+        runs_root=runs_root,
+        output_path=tmp_path / "eval_missing_decision.json",
+    )
+
+    assert out["overall"]["total_runs"] == 1
+    assert out["overall"]["passes"] == 0
+    assert out["results"][0]["status"] == "pending_approval"
+    assert "approval_decision is required" in out["results"][0]["error"]
+
+
+def test_subgraph_eval_scores_mapped_output_and_records_lineage(monkeypatch, tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    fx_path = tmp_path / "subgraph_fixtures.yaml"
+    fx_path.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "id": "refund",
+                    "input": "What is the refund window?",
+                    "expected": "30 days",
+                }
+            ]
+        )
+    )
+
+    replies = [
+        LLMResponse(text="refund window", usage=Usage(1, 1), model="gpt-4o-mini"),
+        LLMResponse(text="Nimbus refunds are available within 30 days.", usage=Usage(1, 1), model="gpt-4o-mini"),
+        LLMResponse(text="The refund window is 30 days.", usage=Usage(1, 1), model="gpt-4o-mini"),
+    ]
+    monkeypatch.setattr(oai, "stream_openai", _Replies(replies))
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    out = run_eval(
+        workflow="rag_subgraph_wrapper",
+        n_per_fixture=1,
+        fixtures_path=fx_path,
+        runs_root=runs_root,
+        output_path=tmp_path / "eval_subgraph.json",
+    )
+
+    assert out["overall"]["total_runs"] == 1
+    assert out["overall"]["passes"] == 1
+    result = out["results"][0]
+    assert result["status"] == "ok"
+    assert result["subgraphs"][0]["child_workflow"] == "linear_rag"
+    assert Path(result["subgraphs"][0]["artifact_path"]).exists()
+    assert (runs_root / result["subgraphs"][0]["child_run_id"] / "parent_run.json").exists()

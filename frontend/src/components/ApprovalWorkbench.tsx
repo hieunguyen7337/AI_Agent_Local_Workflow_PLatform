@@ -1,0 +1,122 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchApprovals } from "../api/client";
+import type { ApprovalSummary } from "../types";
+
+type ApprovalTab = "pending" | "decided";
+
+function fmtTime(ns: number | undefined) {
+  if (!ns) return "-";
+  return new Date(ns / 1_000_000).toLocaleString();
+}
+
+function preview(text: string, max = 90) {
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+export default function ApprovalWorkbench({
+  onSelectRun,
+  selectedRun,
+}: {
+  onSelectRun: (runId: string) => void;
+  selectedRun?: string;
+}) {
+  const [tab, setTab] = useState<ApprovalTab>("pending");
+  const q = useQuery({
+    queryKey: ["approvals", tab],
+    queryFn: () => fetchApprovals(tab),
+  });
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="border-b flex text-xs">
+        {(["pending", "decided"] as ApprovalTab[]).map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={[
+              "px-3 py-2 border-r capitalize",
+              tab === item ? "bg-amber-50 text-amber-900 font-medium" : "bg-white text-gray-500",
+            ].join(" ")}
+            onClick={() => setTab(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {q.isLoading && <div className="p-3 text-sm text-gray-500">Loading approvals...</div>}
+        {q.error && <div className="p-3 text-sm text-red-700">Error loading approvals</div>}
+        {!q.isLoading && !q.error && (q.data ?? []).length === 0 && (
+          <div className="p-3 text-sm text-gray-500">No {tab} approvals.</div>
+        )}
+        <div className="divide-y">
+          {(q.data ?? []).map((approval) => (
+            <ApprovalItem
+              key={approval.run_id}
+              approval={approval}
+              selectedRun={selectedRun}
+              onSelectRun={onSelectRun}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalItem({
+  approval,
+  selectedRun,
+  onSelectRun,
+}: {
+  approval: ApprovalSummary;
+  selectedRun?: string;
+  onSelectRun: (runId: string) => void;
+}) {
+  const selected = selectedRun === approval.run_id;
+  const decision = approval.approval_decision;
+  return (
+    <div className={["p-3 text-xs space-y-2", selected ? "bg-blue-50" : "bg-white"].join(" ")}>
+      <div className="flex items-start justify-between gap-2">
+        <button
+          type="button"
+          className="text-left font-mono text-[11px] text-slate-800 hover:underline"
+          onClick={() => onSelectRun(approval.run_id)}
+        >
+          {approval.run_id}
+        </button>
+        <span
+          className={[
+            "rounded px-2 py-0.5",
+            approval.status === "pending" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800",
+          ].join(" ")}
+        >
+          {approval.status}
+        </span>
+      </div>
+      <div className="text-slate-700">
+        <span className="font-medium">{approval.workflow}</span> /{" "}
+        <span className="font-mono">{approval.node_id}</span>
+      </div>
+      <div className="text-slate-600">{preview(approval.prompt)}</div>
+      <div className="text-slate-500">{fmtTime(approval.created_ns)}</div>
+      {decision && (
+        <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-emerald-900 space-y-1">
+          <div>
+            Decision: <span className="font-medium">{decision.decision}</span>
+            {decision.reviewer ? ` by ${decision.reviewer}` : ""}
+          </div>
+          <div>Status: {decision.continuation_status}</div>
+          <button
+            type="button"
+            className="font-mono text-[11px] text-emerald-900 hover:underline"
+            onClick={() => onSelectRun(decision.continuation_run_id)}
+          >
+            {decision.continuation_run_id}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -11,11 +11,11 @@ from backend.runtime.executor import run_graph
 from backend.runtime.nodes.retriever import make_retriever_node
 from backend.builder.nodes import RetrieverNodeConfig
 from backend.evals.harness import run_eval
-from backend.workflows import linear_rag
+from backend.graphspec import load_workflow_metadata
 
 
 def test_linear_rag_compile_is_acyclic():
-    metadata = linear_rag.build_compiled()
+    metadata = load_workflow_metadata("linear_rag")
     assert metadata.entry == "query_analyser"
     assert metadata.loops == []
     assert metadata.node_ids() == ["query_analyser", "retriever", "reranker", "synthesiser"]
@@ -73,7 +73,7 @@ def test_linear_rag_runtime_and_eval(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(oai, "stream_openai", _reply)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
-    metadata = linear_rag.build_compiled()
+    metadata = load_workflow_metadata("linear_rag")
     run = run_graph(
         metadata,
         user_input="What is the refund window for Nimbus Cloud subscriptions?",

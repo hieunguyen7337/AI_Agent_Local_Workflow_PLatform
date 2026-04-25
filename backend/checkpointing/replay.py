@@ -1,7 +1,6 @@
 """Replay a run from a historical checkpoint snapshot into a forked new run."""
 from __future__ import annotations
 
-import importlib
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -11,7 +10,7 @@ from typing import Any
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from backend.budget.enforcer import BudgetEnforcer
-from backend.builder.api import GraphBuilder, GraphMetadata
+from backend.builder.api import GraphMetadata
 from backend.builder.compile import compile_to_langgraph
 from backend.graphspec import load_workflow_metadata
 from backend.runtime.cancellation import CancellationController
@@ -64,28 +63,6 @@ class ReplayResult:
     @property
     def latency_ms(self) -> float:
         return self.run.latency_ms
-
-
-def load_workflow_module(name: str):
-    module = importlib.import_module(f"backend.workflows.{name}")
-    return module
-
-
-def load_workflow(name: str) -> GraphBuilder:
-    module = load_workflow_module(name)
-    if not hasattr(module, "build"):
-        raise BuilderValidationError(f"workflow {name!r} has no build() function")
-    return module.build()
-
-
-def apply_overrides(builder: GraphBuilder, overrides: dict[str, dict[str, Any]]) -> None:
-    """overrides = {node_id: {field: value, ...}}. Mutates builder in place."""
-    for node_id, fields in overrides.items():
-        if node_id not in builder._nodes:
-            raise BuilderValidationError(f"override target node {node_id!r} not in workflow")
-        cfg = builder._nodes[node_id]
-        updated = cfg.model_copy(update=fields)
-        builder._nodes[node_id] = updated
 
 
 def apply_metadata_overrides(metadata: GraphMetadata, overrides: dict[str, dict[str, Any]]) -> GraphMetadata:
@@ -153,6 +130,7 @@ def _history_app(metadata: GraphMetadata, checkpoint_path: Path, *, run_id: str)
             run_id=run_id,
             graph_name=metadata.name,
             run_dir=checkpoint_path.parent,
+            runs_root=checkpoint_path.parent.parent,
             cancellation=None,
         ),
         gate_router_factory=_gate_router_factory(run_id, metadata.name),
@@ -214,7 +192,6 @@ def resolve_replay_boundary(
 def migrate_snapshot_state(
     snapshot_state: dict[str, Any],
     *,
-    workflow_module,
     source_run_id: str,
     replay_from_node: str,
     user_input: str,
@@ -236,29 +213,7 @@ def migrate_snapshot_state(
         artifacts["_legacy_state"] = legacy
     migrated["artifacts"] = artifacts
 
-    hook = getattr(workflow_module, "migrate_replay_state", None)
-    if callable(hook):
-        overrides = hook(
-            snapshot_state,
-            source_run_id=source_run_id,
-            replay_from_node=replay_from_node,
-        )
-        if overrides is not None:
-            if not isinstance(overrides, dict):
-                raise ReplayError("migrate_replay_state(...) must return a dict or None")
-            migrated = _merge_state_overrides(migrated, overrides)
-
     return migrated
-
-
-def _merge_state_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in overrides.items():
-        if key == "artifacts" and isinstance(value, dict):
-            merged["artifacts"] = {**dict(merged.get("artifacts", {}) or {}), **value}
-        else:
-            merged[key] = value
-    return merged
 
 
 def replay(
@@ -273,7 +228,6 @@ def replay(
     cancellation: CancellationController | None = None,
 ) -> ReplayResult:
     """Replay a run from a migrated snapshot into a new forked run."""
-    workflow_module = load_workflow_module(workflow)
     metadata: GraphMetadata = load_workflow_metadata(workflow)
     if overrides:
         metadata = apply_metadata_overrides(metadata, overrides)
@@ -293,7 +247,6 @@ def replay(
 
     migrated_state = migrate_snapshot_state(
         boundary.snapshot_state,
-        workflow_module=workflow_module,
         source_run_id=run_id,
         replay_from_node=boundary.replay_from_node,
         user_input=effective_user_input,

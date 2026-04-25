@@ -28,6 +28,7 @@ from .nodes import (
     NodeConfig,
     RetrieverNodeConfig,
     RouterNodeConfig,
+    SubgraphNodeConfig,
     TesterNodeConfig,
 )
 from .validation import assert_no_cycle, assert_node_exists
@@ -219,5 +220,6 @@ __all__ = [
     "TesterNodeConfig",
     "GateNodeConfig",
     "RouterNodeConfig",
+    "SubgraphNodeConfig",
     "LoopConfig",
 ]

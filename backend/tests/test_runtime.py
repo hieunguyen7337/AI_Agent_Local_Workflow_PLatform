@@ -20,6 +20,7 @@ from backend.builder.api import (
 from backend.providers import openai as oai
 from backend.providers import openrouter as orouter
 from backend.providers.base import LLMResponse, Usage
+from backend.graphspec import graph_spec_to_metadata, load_graph_spec
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
 
@@ -267,3 +268,29 @@ def test_approval_node_halts_with_pending_artifact(tmp_runs_root):
     assert approval["prompt"] == "Review before continuing."
     assert approval["state_snapshot"]["user_input"] == "needs review"
     assert result.final_state["pending_approval"]["node_id"] == "review"
+
+
+def test_subgraph_node_executes_child_run_and_writes_lineage(monkeypatch, tmp_runs_root):
+    replies = [
+        LLMResponse(text="search query", usage=Usage(10, 2), model="gpt-4o-mini"),
+        LLMResponse(text="relevant evidence", usage=Usage(10, 4), model="gpt-4o-mini"),
+        LLMResponse(text="grounded answer", usage=Usage(10, 5), model="gpt-4o-mini"),
+    ]
+    monkeypatch.setattr(oai, "stream_openai", _Replies(replies))
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    metadata = graph_spec_to_metadata(load_graph_spec("rag_subgraph_wrapper"))
+    result = run_graph(metadata, user_input="What is in the corpus?", runs_root=tmp_runs_root)
+
+    assert result.status == "ok"
+    assert result.final_state["rag_answer"] == "grounded answer"
+    assert result.cost_usd > 0
+
+    lineage_files = list((result.run_dir / "subgraphs").glob("rag_child_*.json"))
+    assert len(lineage_files) == 1
+    lineage = json.loads(lineage_files[0].read_text(encoding="utf-8"))
+    assert lineage["parent_run_id"] == result.run_id
+    assert lineage["child_workflow"] == "linear_rag"
+    assert lineage["status"] == "ok"
+    assert lineage["outputs"] == {"final_answer": "rag_answer"}
+    assert (tmp_runs_root / lineage["child_run_id"] / "parent_run.json").exists()

@@ -16,6 +16,7 @@ function fmtMs(ms: number | null | undefined) {
 function statusColor(s: string) {
   if (s === "ok") return "text-green-700 bg-green-100";
   if (s === "running") return "text-blue-700 bg-blue-100";
+  if (s === "pending_approval") return "text-amber-700 bg-amber-100";
   if (s === "budget_exceeded") return "text-orange-700 bg-orange-100";
   return "text-red-700 bg-red-100";
 }

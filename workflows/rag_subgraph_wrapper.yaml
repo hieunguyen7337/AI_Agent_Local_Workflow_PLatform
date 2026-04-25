@@ -1,0 +1,20 @@
+schema_version: workflow.graph/v1
+name: rag_subgraph_wrapper
+description: Minimal wrapper that executes linear_rag as a reusable collapsed subgraph.
+budget:
+  cost_usd: 0.75
+  latency_ms: 300000
+entry: rag_child
+nodes:
+  - id: rag_child
+    kind: subgraph
+    name: RAG child workflow
+    description: Run the reusable RAG workflow and expose its final answer.
+    workflow: linear_rag
+    inputs:
+      user_input: user_input
+    outputs:
+      final_answer: rag_answer
+edges:
+  - from: rag_child
+    to: __end__

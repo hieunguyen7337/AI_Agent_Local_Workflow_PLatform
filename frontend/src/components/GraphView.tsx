@@ -136,6 +136,13 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
       metadata.rejected_target ? `reject: ${String(metadata.rejected_target)}` : "",
     ].filter(Boolean);
   }
+  if (kind === "subgraph") {
+    return [
+      metadata.workflow ? `workflow: ${String(metadata.workflow)}` : "",
+      metadata.inputs ? `inputs: ${Object.keys(metadata.inputs as Record<string, unknown>).length}` : "",
+      metadata.outputs ? `outputs: ${Object.keys(metadata.outputs as Record<string, unknown>).length}` : "",
+    ].filter(Boolean);
+  }
   return [];
 }
 

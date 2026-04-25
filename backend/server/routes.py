@@ -11,6 +11,12 @@ import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
+from backend.approvals import (
+    ApprovalAlreadyDecidedError,
+    ApprovalDecisionError,
+    ApprovalNotFoundError,
+    decide_approval,
+)
 from backend.builder.api import GraphMetadata
 from backend.builder.nodes import ApprovalNodeConfig, GateNodeConfig, RouterNodeConfig
 from backend.evals.harness import EVALS_ROOT, run_eval_for_metadata
@@ -20,7 +26,11 @@ from backend.graphspec import (
     graph_spec_to_metadata,
     load_graph_spec_source,
     load_workflow_metadata,
+    list_rollback_snapshots,
+    optimize_proposals,
+    preview_rollback_snapshot,
     propose_mutation,
+    restore_rollback_snapshot,
 )
 from backend.graphspec.loader import WORKFLOW_SPECS_ROOT
 from backend.providers.base import ProviderError
@@ -51,10 +61,28 @@ class ApplyProposalRequest(BaseModel):
     accepted_by: str | None = None
 
 
+class OptimizeProposalsRequest(BaseModel):
+    goal: str = Field(min_length=1)
+    constraints: str | None = None
+    candidate_count: int = Field(3, ge=2, le=5)
+    n_per_fixture: int = Field(1, ge=1, le=8)
+    max_cost_usd: float = Field(5.0, gt=0)
+
+
+class RollbackRestoreRequest(BaseModel):
+    accepted_by: str | None = None
+
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+    reviewer: str | None = None
+    comment: str | None = None
+
+
 def load_workflow(name: str) -> GraphMetadata:
     try:
         return load_workflow_metadata(name, specs_root=WORKFLOW_SPECS_ROOT)
-    except (FileNotFoundError, ModuleNotFoundError):
+    except FileNotFoundError:
         raise HTTPException(404, f"workflow {name!r} not found")
 
 
@@ -214,6 +242,95 @@ def post_spec_apply(workflow: str, request: ApplyProposalRequest) -> dict:
     }
 
 
+@router.get("/api/spec/{workflow}/rollback-snapshots")
+def get_rollback_snapshots(workflow: str) -> dict:
+    try:
+        snapshots = list_rollback_snapshots(
+            workflow,
+            specs_root=WORKFLOW_SPECS_ROOT,
+            audit_root=SPEC_AUDIT_ROOT,
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, f"workflow spec {workflow!r} not found")
+    return {
+        "workflow": workflow,
+        "snapshots": [
+            {
+                "snapshot_id": snapshot.snapshot_id,
+                "audit_path": snapshot.audit_path.as_posix(),
+                "rollback_path": snapshot.rollback_path.as_posix(),
+                "created_at": snapshot.created_at,
+                "accepted_by": snapshot.accepted_by,
+                "proposal_summary": snapshot.proposal_summary,
+                "original_sha256": snapshot.original_sha256,
+                "proposed_sha256": snapshot.proposed_sha256,
+            }
+            for snapshot in snapshots
+        ],
+    }
+
+
+@router.get("/api/spec/{workflow}/rollback-snapshots/{snapshot_id}/preview")
+def get_rollback_snapshot_preview(workflow: str, snapshot_id: str) -> dict:
+    try:
+        preview = preview_rollback_snapshot(
+            workflow,
+            snapshot_id,
+            specs_root=WORKFLOW_SPECS_ROOT,
+            audit_root=SPEC_AUDIT_ROOT,
+        )
+    except FileNotFoundError as exc:
+        message = str(exc)
+        if "rollback snapshot" in message:
+            raise HTTPException(404, message)
+        raise HTTPException(404, f"workflow spec {workflow!r} not found")
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(400, str(exc))
+    return {
+        "workflow": preview.workflow,
+        "snapshot_id": preview.snapshot_id,
+        "current_yaml": preview.current_yaml,
+        "rollback_yaml": preview.rollback_yaml,
+        "diff": preview.diff,
+    }
+
+
+@router.post("/api/spec/{workflow}/rollback-snapshots/{snapshot_id}/restore")
+def post_rollback_snapshot_restore(
+    workflow: str,
+    snapshot_id: str,
+    request: RollbackRestoreRequest | None = None,
+) -> dict:
+    try:
+        restored = restore_rollback_snapshot(
+            workflow,
+            snapshot_id,
+            accepted_by=request.accepted_by if request else None,
+            specs_root=WORKFLOW_SPECS_ROOT,
+            audit_root=SPEC_AUDIT_ROOT,
+        )
+    except FileNotFoundError as exc:
+        message = str(exc)
+        if "rollback snapshot" in message:
+            raise HTTPException(404, message)
+        raise HTTPException(404, f"workflow spec {workflow!r} not found")
+    except (ValueError, ValidationError, yaml.YAMLError) as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(500, f"failed to restore rollback snapshot: {exc}")
+    return {
+        "workflow": restored.workflow,
+        "status": restored.status,
+        "source_path": restored.source_path.as_posix(),
+        "snapshot_id": restored.snapshot_id,
+        "audit_path": restored.audit_path.as_posix(),
+        "rollback_path": restored.rollback_path.as_posix(),
+        "diff": restored.diff,
+        "spec": restored.spec.model_dump(mode="json"),
+        "yaml": restored.yaml_text,
+    }
+
+
 @router.post("/api/spec/{workflow}/evaluate-proposal")
 def post_spec_proposal_eval(workflow: str, request: ProposalEvaluationRequest) -> dict:
     try:
@@ -269,6 +386,52 @@ def post_spec_proposal_eval(workflow: str, request: ProposalEvaluationRequest) -
     }
 
 
+@router.post("/api/spec/{workflow}/optimize-proposals")
+def post_spec_optimize_proposals(workflow: str, request: OptimizeProposalsRequest) -> dict:
+    try:
+        report = optimize_proposals(
+            workflow=workflow,
+            goal=request.goal,
+            constraints=request.constraints,
+            candidate_count=request.candidate_count,
+            n_per_fixture=request.n_per_fixture,
+            max_cost_usd=request.max_cost_usd,
+            runs_root=RUNS_ROOT,
+            evals_root=EVALS_ROOT,
+        )
+    except FileNotFoundError as exc:
+        message = str(exc)
+        if "eval fixtures" in message:
+            raise HTTPException(400, message)
+        raise HTTPException(404, f"workflow spec {workflow!r} not found")
+    except (ValueError, ValidationError, yaml.YAMLError) as exc:
+        raise HTTPException(400, str(exc))
+    except ProviderError as exc:
+        raise HTTPException(503, f"optimization provider error: {exc}")
+    return {
+        "workflow": report.workflow,
+        "status": report.status,
+        "recommended_candidate_id": report.recommended_candidate_id,
+        "report_artifact": report.report_artifact,
+        "original_yaml": report.original_yaml,
+        "candidates": [
+            {
+                "candidate_id": candidate.candidate_id,
+                "status": candidate.status,
+                "summary": candidate.summary,
+                "proposed_yaml": candidate.proposed_yaml,
+                "diff": candidate.diff,
+                "validation_errors": candidate.validation_errors,
+                "eval": candidate.eval,
+                "run_artifact": candidate.run_artifact,
+                "rank": candidate.rank,
+                "recommended": candidate.recommended,
+            }
+            for candidate in report.candidates
+        ],
+    }
+
+
 @router.get("/api/graph/{workflow}/node-metrics")
 def get_graph_node_metrics(workflow: str, limit: int = 50) -> dict:
     if limit <= 0:
@@ -295,11 +458,43 @@ def list_runs(limit: int = 50) -> list[dict]:
 
 
 @router.get("/api/approvals")
-def list_approvals() -> list[dict]:
-    return list_approval_data(runs_root=RUNS_ROOT)
+def list_approvals(status: str = "pending") -> list[dict]:
+    if status not in {"pending", "decided", "all"}:
+        raise HTTPException(400, "status must be one of: pending, decided, all")
+    return list_approval_data(runs_root=RUNS_ROOT, status=status)
 
 
-def list_approval_data(*, runs_root: Path) -> list[dict[str, Any]]:
+@router.post("/api/approvals/{run_id}/decision")
+def post_approval_decision(run_id: str, request: ApprovalDecisionRequest) -> dict:
+    try:
+        result = decide_approval(
+            run_id=run_id,
+            decision=request.decision,  # type: ignore[arg-type]
+            reviewer=request.reviewer,
+            comment=request.comment,
+            runs_root=RUNS_ROOT,
+        )
+    except ApprovalNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ApprovalAlreadyDecidedError as exc:
+        raise HTTPException(409, str(exc))
+    except ApprovalDecisionError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(500, f"failed to record approval decision: {exc}")
+    return {
+        "source_run_id": result.source_run_id,
+        "status": result.status,
+        "decision": result.decision,
+        "decision_artifact": result.decision_artifact.as_posix(),
+        "continuation_run_id": result.continuation_run_id,
+        "continuation_status": result.continuation_status,
+        "continuation_run_dir": result.continuation_run_dir.as_posix(),
+        "continuation_error": result.continuation_error,
+    }
+
+
+def list_approval_data(*, runs_root: Path, status: str = "pending") -> list[dict[str, Any]]:
     if not runs_root.exists():
         return []
     approvals: list[dict[str, Any]] = []
@@ -309,6 +504,19 @@ def list_approval_data(*, runs_root: Path) -> list[dict[str, Any]]:
         except (OSError, json.JSONDecodeError):
             continue
         approval["artifact_path"] = path.as_posix()
+        decision_path = path.parent / "approval_decision.json"
+        if decision_path.exists():
+            try:
+                decision = json.loads(decision_path.read_text(encoding="utf-8"))
+                decision["artifact_path"] = decision_path.as_posix()
+                approval["approval_decision"] = decision
+                approval["status"] = "decided"
+            except (OSError, json.JSONDecodeError):
+                approval["status"] = "pending"
+        else:
+            approval["status"] = "pending"
+        if status != "all" and approval["status"] != status:
+            continue
         approvals.append(approval)
     approvals.sort(key=lambda item: item.get("created_ns") or 0, reverse=True)
     return approvals
@@ -422,4 +630,41 @@ def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
             out["approval"] = approval
         except (OSError, json.JSONDecodeError):
             out["approval"] = None
+    decision_path = run_dir / "approval_decision.json"
+    if decision_path.exists():
+        try:
+            decision = json.loads(decision_path.read_text(encoding="utf-8"))
+            decision["artifact_path"] = decision_path.as_posix()
+            out["approval_decision"] = decision
+        except (OSError, json.JSONDecodeError):
+            out["approval_decision"] = None
+    resume_path = run_dir / "approval_resume.json"
+    if resume_path.exists():
+        try:
+            resume = json.loads(resume_path.read_text(encoding="utf-8"))
+            resume["artifact_path"] = resume_path.as_posix()
+            out["approval_resume"] = resume
+        except (OSError, json.JSONDecodeError):
+            out["approval_resume"] = None
+    subgraph_dir = run_dir / "subgraphs"
+    subgraphs: list[dict[str, Any]] = []
+    if subgraph_dir.exists():
+        for path in sorted(subgraph_dir.glob("*.json")):
+            try:
+                item = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(item, dict):
+                    item["artifact_path"] = path.as_posix()
+                    subgraphs.append(item)
+            except (OSError, json.JSONDecodeError):
+                continue
+    if subgraphs:
+        out["subgraphs"] = subgraphs
+    parent_path = run_dir / "parent_run.json"
+    if parent_path.exists():
+        try:
+            parent = json.loads(parent_path.read_text(encoding="utf-8"))
+            parent["artifact_path"] = parent_path.as_posix()
+            out["parent_run"] = parent
+        except (OSError, json.JSONDecodeError):
+            out["parent_run"] = None
     return out

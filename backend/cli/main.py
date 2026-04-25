@@ -50,7 +50,7 @@ class _CancelHandler:
 
 @app.command()
 def run(
-    workflow: str = typer.Argument(..., help="workflow module name under backend.workflows"),
+    workflow: str = typer.Argument(..., help="workflow id under workflows/*.yaml"),
     input: str = typer.Option(..., "--input", "-i", help="user input for the workflow"),
     expected: str = typer.Option(
         "The code should satisfy the task with correct, well-tested logic.",
@@ -144,7 +144,7 @@ def replay(
 
 @app.command()
 def eval(
-    workflow: str = typer.Argument(..., help="workflow module name"),
+    workflow: str = typer.Argument(..., help="workflow id under workflows/*.yaml"),
     n: int = typer.Option(4, "--n", help="runs per fixture"),
     baseline_path: str | None = typer.Option(
         None,
@@ -185,7 +185,7 @@ def eval(
 
 @app.command("export-mermaid")
 def export_mermaid(
-    workflow: str = typer.Argument(..., help="workflow module name"),
+    workflow: str = typer.Argument(..., help="workflow id under workflows/*.yaml"),
 ) -> None:
     """Print a Mermaid flowchart for a workflow."""
     metadata = _load_workflow_metadata(workflow)

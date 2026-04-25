@@ -6,7 +6,7 @@ Promote a canonical Pydantic `GraphSpec` layer for M3.3.
 
 YAML workflow files are now the primary editable source of truth. `GraphSpec` validates and normalizes those files, then adapts them into the existing `GraphMetadata` runtime representation.
 
-Python workflow modules remain as a temporary compatibility bridge and fallback, but they are no longer the intended long-term authoring surface.
+As of M5.5, CLI, replay, eval, API, and graph export paths load workflows from YAML specs only. The typed Python builder remains as an internal metadata/compiler helper, not a workflow authoring fallback.
 
 ## Context
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel
@@ -12,6 +13,8 @@ class Fixture(BaseModel):
     input: str
     expected: str
     test_code: str | None = None
+    approval_decision: Literal["approved", "rejected"] | None = None
+    approval_comment: str | None = None
     meta: dict = {}
 
 

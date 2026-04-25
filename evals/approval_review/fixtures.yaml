@@ -1,0 +1,11 @@
+- id: approved_review
+  input: "Draft a concise answer. Include the exact phrase 'human approved'."
+  expected: "human approved"
+  approval_decision: approved
+  approval_comment: "Approved in eval fixture."
+
+- id: rejected_review
+  input: "Draft a concise answer that should be rejected before finalization."
+  expected: ""
+  approval_decision: rejected
+  approval_comment: "Rejected in eval fixture."

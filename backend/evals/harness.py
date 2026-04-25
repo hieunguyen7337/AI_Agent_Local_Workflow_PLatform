@@ -5,6 +5,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from backend.approvals import decide_approval
 from backend.evals.fixtures import Fixture, load_fixtures
 from backend.evals.metrics import EvalSummary, confidence_intervals, summarize
 from backend.evals.regression import build_baseline_snapshot, compare_against_baseline
@@ -62,6 +63,7 @@ def run_eval_for_metadata(
     all_results: list[dict] = []
     per_fixture_summaries: dict[str, EvalSummary] = {}
     per_fixture_ci: dict[str, dict] = {}
+    approval_path_coverage: dict[str, int] = {}
     stopped_cost_cap = False
 
     for fx in fixtures:
@@ -78,19 +80,19 @@ def run_eval_for_metadata(
                 initial_state_overrides=initial_overrides,
                 cancellation=cancellation,
             )
-            passed = _infer_pass(result.final_state, fx.expected, has_tester_node=has_tester_node)
-            per_fx.append(
-                {
-                    "fixture_id": fx.id,
-                    "iteration": i,
-                    "run_id": result.run_id,
-                    "pass": passed,
-                    "cost_usd": result.cost_usd,
-                    "latency_ms": result.latency_ms,
-                    "status": result.status,
-                    "error": result.error,
-                }
+            eval_result = _build_eval_result(
+                workflow=workflow,
+                metadata=metadata,
+                fixture=fx,
+                iteration=i,
+                result=result,
+                runs_root=runs_root,
+                has_tester_node=has_tester_node,
             )
+            if eval_result.get("approval_decision"):
+                decision = str(eval_result["approval_decision"])
+                approval_path_coverage[decision] = approval_path_coverage.get(decision, 0) + 1
+            per_fx.append(eval_result)
             if max_cost_usd is not None:
                 total_cost = sum(float(r.get("cost_usd", 0.0)) for r in all_results) + sum(
                     float(r.get("cost_usd", 0.0)) for r in per_fx
@@ -131,6 +133,7 @@ def run_eval_for_metadata(
         "overall_ci": overall_ci,
         "per_fixture": {fid: asdict(s) for fid, s in per_fixture_summaries.items()},
         "per_fixture_ci": per_fixture_ci,
+        "approval_path_coverage": approval_path_coverage,
         "results": all_results,
     }
 
@@ -201,9 +204,123 @@ def _infer_pass(final_state: dict, expected: str, *, has_tester_node: bool) -> b
     if not expected_text:
         return False
 
-    candidate_keys = ("final_answer", "synthesiser_output", "answer", "output", "coder_output")
+    candidate_keys = (
+        "final_answer",
+        "rag_answer",
+        "synthesiser_output",
+        "answer",
+        "output",
+        "coder_output",
+    )
     for key in candidate_keys:
         value = final_state.get(key)
         if isinstance(value, str) and value.strip():
             return expected_text in value.lower()
     return False
+
+
+def _build_eval_result(
+    *,
+    workflow: str,
+    metadata: GraphMetadata,
+    fixture: Fixture,
+    iteration: int,
+    result,
+    runs_root: Path,
+    has_tester_node: bool,
+) -> dict:
+    if result.status != "pending_approval":
+        eval_result = {
+            "fixture_id": fixture.id,
+            "iteration": iteration,
+            "run_id": result.run_id,
+            "pass": _infer_pass(
+                result.final_state,
+                fixture.expected,
+                has_tester_node=has_tester_node,
+            ),
+            "cost_usd": result.cost_usd,
+            "latency_ms": result.latency_ms,
+            "status": result.status,
+            "error": result.error,
+        }
+        subgraphs = _read_subgraph_lineage(result.run_dir)
+        if subgraphs:
+            eval_result["subgraphs"] = subgraphs
+        return eval_result
+
+    if fixture.approval_decision is None:
+        return {
+            "fixture_id": fixture.id,
+            "iteration": iteration,
+            "run_id": result.run_id,
+            "source_run_id": result.run_id,
+            "pass": False,
+            "cost_usd": result.cost_usd,
+            "latency_ms": result.latency_ms,
+            "status": "pending_approval",
+            "error": "fixture approval_decision is required for pending approval runs",
+        }
+
+    decision = decide_approval(
+        run_id=result.run_id,
+        decision=fixture.approval_decision,
+        reviewer="eval",
+        comment=fixture.approval_comment,
+        runs_root=runs_root,
+        metadata=metadata,
+    )
+    decision_artifact = decision.decision_artifact.as_posix()
+    approval_resume_artifact = (decision.continuation_run_dir / "approval_resume.json").as_posix()
+    passed = _infer_approval_pass(
+        final_state=decision.continuation_final_state,
+        expected=fixture.expected,
+        decision=fixture.approval_decision,
+        continuation_status=decision.continuation_status,
+        has_tester_node=has_tester_node,
+    )
+    return {
+        "fixture_id": fixture.id,
+        "iteration": iteration,
+        "run_id": decision.continuation_run_id,
+        "source_run_id": result.run_id,
+        "continuation_run_id": decision.continuation_run_id,
+        "approval_decision": fixture.approval_decision,
+        "decision_artifact": decision_artifact,
+        "approval_resume_artifact": approval_resume_artifact,
+        "pass": passed,
+        "cost_usd": decision.continuation_cost_usd,
+        "latency_ms": decision.continuation_latency_ms,
+        "status": decision.continuation_status,
+        "error": decision.continuation_error,
+    }
+
+
+def _read_subgraph_lineage(run_dir: Path) -> list[dict]:
+    subgraph_dir = run_dir / "subgraphs"
+    if not subgraph_dir.exists():
+        return []
+    out: list[dict] = []
+    for path in sorted(subgraph_dir.glob("*.json")):
+        try:
+            item = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(item, dict):
+                item["artifact_path"] = path.as_posix()
+                out.append(item)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return out
+
+
+def _infer_approval_pass(
+    *,
+    final_state: dict,
+    expected: str,
+    decision: str,
+    continuation_status: str,
+    has_tester_node: bool,
+) -> bool:
+    expected_text = str(expected or "").strip()
+    if decision == "rejected" and not expected_text:
+        return continuation_status == "ok"
+    return _infer_pass(final_state, expected_text, has_tester_node=has_tester_node)

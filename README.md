@@ -1,7 +1,7 @@
-# Local AI Workflow Platform - M4.1
+# Local AI Workflow Platform - M5.5
 
 A local-first platform to author, run, visualize, and iterate on AI workflows.
-M4.1 promotes declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in the UI, and compiled into the existing LangGraph runtime with read-only human approval interrupts:
+M5.5 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in the UI, and compiled into the existing LangGraph runtime with YAML-only workflow loading, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs, richer parent/child subgraph review, multi-proposal optimization reports, and audited rollback restore:
 
 ## Vision
 
@@ -14,15 +14,16 @@ Each workflow should be built from a simple source-of-truth file that is easy fo
 - `supervisor_loop`: `supervisor -> dispatch -> (researcher | writer | END)` with bounded specialist loop-backs
 - `dispatch_aggregate`: `dispatcher -> specialist_a + specialist_b -> aggregator -> END`
 - `approval_review`: `draft -> human_review approval -> (finalizer | END)`
+- `rag_subgraph_wrapper`: `rag_child subgraph(linear_rag) -> END`
 
 - Authoring: YAML workflow specs (`workflows/*.yaml`) backed by Pydantic `GraphSpec` (`backend/graphspec/`)
-- Compatibility: typed Python builder (`backend/builder/`) remains as a fallback during migration
+- Compiler helper: typed Python builder (`backend/builder/`) is an internal metadata/compiler layer, not a workflow authoring surface
 - Runtime: LangGraph `StateGraph` + SQLite checkpointing
 - Telemetry: OpenTelemetry-style span export to SQLite + JSONL
 - Budget: cost + latency enforcement after a node completes and before the next node dispatches
 - Tester: sandboxed Python execution (timeout/output guardrails) with LLM-judge fallback when no test code is provided
 - Evals: YAML fixtures -> Nx runs -> metrics JSON + confidence intervals + baseline regression checks
-- UI: FastAPI + React Flow topology + source inspector + proposal review/eval/apply + pending approval display + run list/detail + telemetry overlays + workflow selector + WebSocket live updates
+- UI: FastAPI + React Flow topology + source inspector + proposal review/eval/apply + approval workbench + run list/detail + telemetry overlays + workflow selector + WebSocket live updates
 - Providers: OpenRouter and direct OpenAI
 - Workflow defaults: `coder_tester` -> OpenRouter `minimax/minimax-m2.7`; `linear_rag`, `supervisor_loop`, and `dispatch_aggregate` -> OpenAI `gpt-4o-mini`
 - Pricing: provider/model rates loaded from `prices.yaml`; budget correctness does not depend on provider stream-abort support
@@ -70,7 +71,7 @@ npm install
 cd ..
 ```
 
-## Verify M4.1 End-to-End
+## Verify M5.5 End-to-End
 
 From repo root (Windows commands shown):
 
@@ -116,19 +117,30 @@ Optional explicit sandbox test file:
 .\.venv\Scripts\python -m backend.cli.main run approval_review --input "Draft a short approval-gated answer."
 ```
 
-Expected status is `pending_approval`; the run writes `runs/<run_id>/approval.json`.
+Expected status is `pending_approval`; the run writes `runs/<run_id>/approval.json`. In the UI, the selected run can then be approved or rejected, which creates `approval_decision.json` and a forked continuation run.
 
-7. Run workflow eval harnesses (`n=4`):
+7. Run one `rag_subgraph_wrapper` execution to confirm nested subgraph behavior:
+
+```powershell
+.\.venv\Scripts\python -m backend.cli.main run rag_subgraph_wrapper --input "What is the refund window for Nimbus Cloud subscriptions?"
+```
+
+Expected status is `ok`; the parent run writes subgraph lineage under `runs/<parent_run_id>/subgraphs/`, and the child run writes `parent_run.json`.
+
+8. Run workflow eval harnesses (`n=4`):
 
 ```powershell
 .\.venv\Scripts\python -m backend.cli.main eval coder_tester --n 4
 .\.venv\Scripts\python -m backend.cli.main eval linear_rag --n 4
 .\.venv\Scripts\python -m backend.cli.main eval supervisor_loop --n 4
 .\.venv\Scripts\python -m backend.cli.main eval dispatch_aggregate --n 4
+.\.venv\Scripts\python -m backend.cli.main eval approval_review --n 4
+.\.venv\Scripts\python -m backend.cli.main eval rag_subgraph_wrapper --n 4
 ```
-`coder_tester` eval fixtures now include executable `test_code`, so evals run sandbox mode by default.
+`coder_tester` eval fixtures include executable `test_code`, so evals run sandbox mode by default. `approval_review` fixtures include approval decisions so evals can resume without live human input.
+`rag_subgraph_wrapper` fixtures score mapped `rag_answer` output and preserve parent/child lineage in eval results.
 
-8. Optional baseline workflow:
+9. Optional baseline workflow:
 
 ```powershell
 # Set baseline
@@ -136,15 +148,19 @@ Expected status is `pending_approval`; the run writes `runs/<run_id>/approval.js
 .\.venv\Scripts\python -m backend.cli.main eval linear_rag --n 4 --update-baseline
 .\.venv\Scripts\python -m backend.cli.main eval supervisor_loop --n 4 --update-baseline
 .\.venv\Scripts\python -m backend.cli.main eval dispatch_aggregate --n 4 --update-baseline
+.\.venv\Scripts\python -m backend.cli.main eval approval_review --n 4 --update-baseline
+.\.venv\Scripts\python -m backend.cli.main eval rag_subgraph_wrapper --n 4 --update-baseline
 
 # Compare and fail on regression
 .\.venv\Scripts\python -m backend.cli.main eval coder_tester --n 4 --fail-on-regression
 .\.venv\Scripts\python -m backend.cli.main eval linear_rag --n 4 --fail-on-regression
 .\.venv\Scripts\python -m backend.cli.main eval supervisor_loop --n 4 --fail-on-regression
 .\.venv\Scripts\python -m backend.cli.main eval dispatch_aggregate --n 4 --fail-on-regression
+.\.venv\Scripts\python -m backend.cli.main eval approval_review --n 4 --fail-on-regression
+.\.venv\Scripts\python -m backend.cli.main eval rag_subgraph_wrapper --n 4 --fail-on-regression
 ```
 
-9. Export Mermaid diagrams:
+10. Export Mermaid diagrams:
 
 ```powershell
 .\.venv\Scripts\python -m backend.cli.main export-mermaid coder_tester
@@ -152,9 +168,10 @@ Expected status is `pending_approval`; the run writes `runs/<run_id>/approval.js
 .\.venv\Scripts\python -m backend.cli.main export-mermaid supervisor_loop
 .\.venv\Scripts\python -m backend.cli.main export-mermaid dispatch_aggregate
 .\.venv\Scripts\python -m backend.cli.main export-mermaid approval_review
+.\.venv\Scripts\python -m backend.cli.main export-mermaid rag_subgraph_wrapper
 ```
 
-10. Optional replay workflow:
+11. Optional replay workflow:
 
 ```powershell
 # Full rerun from migrated source snapshot into a new run directory
@@ -164,7 +181,7 @@ Expected status is `pending_approval`; the run writes `runs/<run_id>/approval.js
 .\.venv\Scripts\python -m backend.cli.main replay <source_run_id> --workflow coder_tester --at coder --set coder.temperature=0.1
 ```
 
-11. Cooperative cancellation:
+12. Cooperative cancellation:
 
 ```powershell
 # While any long-running command is active:
@@ -196,12 +213,17 @@ npm run dev -- --host 127.0.0.1 --port 5173
 Open `http://127.0.0.1:5173`.
 
 Expected behavior:
-- workflow selector switches between `coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, and `approval_review`
+- workflow selector switches between `coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, and `rag_subgraph_wrapper`
 - graph renders for selected workflow
 - selecting a graph node opens source metadata in the inspector
+- selecting a subgraph node can open the referenced child graph without changing the parent workflow selector
 - source inspector shows raw YAML, validation status, mutation proposal diffs, proposal eval summaries, and apply results
+- the Propose tab can generate multiple optimization candidates, evaluate them under a shared cost cap, and recommend a candidate for human review
+- the Rollback tab lists apply/restore snapshots, previews diffs, and restores selected YAML after confirmation
 - applying a valid proposal writes `workflows/*.yaml` and creates an audit record plus rollback snapshot
-- pending approval runs show approval node, prompt, timestamp, and artifact path in run detail
+- pending approval runs show approval node, prompt, timestamp, artifact path, and approve/reject controls in run detail
+- approvals panel shows pending and decided approvals, with source and continuation run navigation
+- run detail shows parent-to-child and child-to-parent subgraph lineage navigation
 - run list/detail and node overlays update live via `/ws/live` (no polling loop required)
 - selecting a run shows status/cost/latency/spans
 - nodes show overlay badges: `Fail %`, `P95`, `$/run`, `Retries/run`
@@ -242,10 +264,10 @@ Expected behavior:
 
 - Canonical editable specs live in [workflows](workflows).
 - Specs are parsed by [backend/graphspec](backend/graphspec), validated as `GraphSpec`, and adapted to the existing runtime `GraphMetadata`.
-- CLI, eval, replay, and API loading prefer YAML specs and fall back to Python workflow modules only for compatibility.
+- CLI, eval, replay, and API loading use YAML specs only.
 - `/api/graph/{workflow}` returns topology plus full node metadata so the frontend can show both graph shape and node configuration.
 - `/api/spec/{workflow}` returns raw YAML plus validated `GraphSpec` JSON.
-- `/api/approvals` returns pending approval artifacts discovered under `runs/*/approval.json`.
+- `/api/approvals?status=pending|decided|all` returns approval artifacts discovered under `runs/*/approval.json`, with decision metadata when present.
 - YAML is the human/LLM editing format. Pydantic `GraphSpec` is the trusted contract.
 
 ## Source Inspection And Proposal Review
@@ -255,8 +277,12 @@ Expected behavior:
 - Proposed YAML is validated through `GraphSpec` and returned with a unified diff; workflow files are not modified.
 - Valid proposals can be evaluated with `POST /api/spec/{workflow}/evaluate-proposal`, which runs existing eval fixtures against the proposed spec in memory.
 - Proposal eval artifacts are written under `runs/proposal_eval_<workflow>_<timestamp>/eval.json`.
+- Multiple candidates can be generated and compared with `POST /api/spec/{workflow}/optimize-proposals`.
+- Optimization reports are written under `runs/optimization_<workflow>_<timestamp>/report.json` and rank candidates by regression status, pass rate, cost, and latency.
 - Valid proposals can be accepted with `POST /api/spec/{workflow}/apply-proposal` after explicit human confirmation in the UI.
 - Applying a proposal writes the canonical YAML file, refreshes graph/source views, and creates `runs/spec_audit/<workflow>/<timestamp>/audit.json` plus `original.yaml` rollback snapshot.
+- Rollback snapshots can be listed, previewed, and restored through `/api/spec/{workflow}/rollback-snapshots`.
+- Restoring a snapshot validates the YAML, writes the canonical workflow file, refreshes graph/source views, and creates a new restore audit entry.
 
 ## Approval Interrupts
 
@@ -264,7 +290,21 @@ Expected behavior:
 - An approval node pauses execution with run status `pending_approval` and writes `runs/<run_id>/approval.json`.
 - Approval artifacts include workflow, run id, node id, prompt, targets, timestamp, and a review state snapshot.
 - `/api/approvals` and `/api/runs/{run_id}` expose approval metadata read-only.
-- Approve/reject/resume controls are intentionally deferred.
+- `POST /api/approvals/{run_id}/decision` records an approve/reject decision and forks a continuation run.
+- Decision artifacts are written to `runs/<run_id>/approval_decision.json`; continuation lineage is written to `runs/<continuation_run_id>/approval_resume.json`.
+- The frontend approval workbench separates pending and decided approvals and links between source and continuation runs.
+- Eval fixtures can provide `approval_decision: approved|rejected` so approval workflows can be evaluated without live human input.
+
+## Reusable Subgraphs
+
+- YAML specs can include `kind: subgraph` nodes that reference another workflow by id.
+- Subgraph `inputs` map parent state keys into child workflow state keys; `outputs` map child final-state keys back into parent state keys.
+- Subgraph executions create nested local runs and write parent/child lineage artifacts.
+- Subgraph nodes are shown collapsed in the graph and source inspector with their referenced workflow and mappings.
+- The source inspector can open the referenced child graph in place for read-only review.
+- Run detail exposes subgraph child runs and parent run links from lineage artifacts.
+- Eval fixtures can score mapped subgraph output state such as `rag_answer`.
+- M5.2 intentionally supports acyclic, non-approval child workflows only; nested approval resume semantics are deferred.
 
 ## Replay Behavior
 
@@ -272,7 +312,6 @@ Expected behavior:
 - `--at <node>` is functional and replays from the most recent checkpoint boundary that would execute that node
 - if `--input` is omitted, replay defaults to the source snapshot's `user_input`
 - additive and removed state-schema changes are handled by default migration
-- workflow-specific rename/reshape fixes can be implemented with `migrate_replay_state(...)` in the workflow module
 - each replay run writes lineage metadata to `runs/<replay_run_id>/replay.json`
 
 ## Cancellation Behavior
@@ -290,6 +329,8 @@ Expected behavior:
 - [workflows/linear_rag.yaml](workflows/linear_rag.yaml)
 - [workflows/supervisor_loop.yaml](workflows/supervisor_loop.yaml)
 - [workflows/dispatch_aggregate.yaml](workflows/dispatch_aggregate.yaml)
+- [workflows/approval_review.yaml](workflows/approval_review.yaml)
+- [workflows/rag_subgraph_wrapper.yaml](workflows/rag_subgraph_wrapper.yaml)
 
 2. GraphSpec, builder, and compilation
 - [backend/graphspec/models.py](backend/graphspec/models.py)
@@ -305,6 +346,7 @@ Expected behavior:
 - [backend/runtime/nodes/tester.py](backend/runtime/nodes/tester.py)
 - [backend/runtime/nodes/gate.py](backend/runtime/nodes/gate.py)
 - [backend/runtime/nodes/router.py](backend/runtime/nodes/router.py)
+- [backend/runtime/nodes/subgraph.py](backend/runtime/nodes/subgraph.py)
 
 4. Provider abstraction and pricing
 - [backend/providers/base.py](backend/providers/base.py)
@@ -322,6 +364,8 @@ Expected behavior:
 - [evals/linear_rag/fixtures.yaml](evals/linear_rag/fixtures.yaml)
 - [evals/supervisor_loop/fixtures.yaml](evals/supervisor_loop/fixtures.yaml)
 - [evals/dispatch_aggregate/fixtures.yaml](evals/dispatch_aggregate/fixtures.yaml)
+- [evals/approval_review/fixtures.yaml](evals/approval_review/fixtures.yaml)
+- [evals/rag_subgraph_wrapper/fixtures.yaml](evals/rag_subgraph_wrapper/fixtures.yaml)
 
 ## Run Artifacts
 
@@ -332,33 +376,43 @@ runs/<run_id>/
   telemetry.db
   spans.jsonl
   checkpoints.db
+  subgraphs/<node_id>_<child_run_id>.json
+  parent_run.json
   approval.json
+  approval_decision.json
+  approval_resume.json
 ```
 
-Main eval outputs:
+Main eval and audit outputs:
 
 ```text
 runs/eval_coder_tester.json
 runs/eval_linear_rag.json
 runs/eval_supervisor_loop.json
 runs/eval_dispatch_aggregate.json
+runs/eval_approval_review.json
+runs/eval_rag_subgraph_wrapper.json
 runs/proposal_eval_<workflow>_<timestamp>/eval.json
+runs/optimization_<workflow>_<timestamp>/report.json
 runs/spec_audit/<workflow>/<timestamp>/audit.json
 runs/spec_audit/<workflow>/<timestamp>/original.yaml
 ```
 
-## M4.1 Limits (by design)
+## M5.5 Limits (by design)
 
-- Five reference workflows only (`coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`)
+- Six reference workflows only (`coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, `rag_subgraph_wrapper`)
 - Two direct providers only (`openrouter`, `openai`)
-- YAML workflow specs are the editable source of truth; Python workflow modules remain only as compatibility fallback
+- YAML workflow specs are the editable source of truth; legacy Python workflow modules are no longer a runtime fallback
 - mutation proposals and proposal evals are read-only until a human explicitly applies a valid proposal
-- applying a proposal creates a rollback snapshot, but restore/revert controls are still deferred
-- approval nodes can pause runs and expose pending state, but approve/reject/resume controls are still deferred
+- optimization can recommend a candidate, but cannot automatically apply it
+- applying a proposal and restoring a rollback snapshot both create audit records, but there is no multi-user approval or auth layer
+- approval resume uses forked continuation runs; in-place continuation of the original run is intentionally avoided
+- approval workflows can be evaluated with fixture-provided decisions, but approval-containing child subgraphs are still deferred
+- subgraph UI renders collapsed parent nodes with read-only child graph inspection; full inline graph expansion/editing is still deferred
 - JSON graph import/export is still deferred until the YAML + `GraphSpec` contract stabilizes
 - Branch outputs in `dispatch_aggregate` remain fixed named state keys rather than a generic map-reduce collection
 - Replay stays within the same workflow id and still assumes stable node ids for the selected replay point
-- Generic replay migration covers additive/removal schema changes; rename-level changes need workflow hook logic
+- Generic replay migration covers additive/removal schema changes; rename-level replay migrations need a future YAML/spec-aware compatibility path
 - Streaming cancellation applies to LLM provider calls only; retriever and sandbox tester still stop at node boundaries
 - Budget checks happen after node completion, not during provider generation
 - Eval variance at `n=4` is expected for non-deterministic model behavior

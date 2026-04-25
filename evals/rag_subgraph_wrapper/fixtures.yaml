@@ -1,0 +1,5 @@
+- id: refund_window
+  input: "What is the refund window for Nimbus Cloud subscriptions?"
+  expected: "30 days"
+  meta:
+    checks: "Scores mapped rag_answer output from the linear_rag child workflow."

@@ -1,15 +1,31 @@
 import { useEffect, useState } from "react";
-import { applySpecProposal, evaluateSpecProposal, proposeSpecMutation } from "../api/client";
+import { useQuery } from "@tanstack/react-query";
+import {
+  applySpecProposal,
+  evaluateSpecProposal,
+  fetchRollbackPreview,
+  fetchRollbackSnapshots,
+  fetchTopology,
+  fetchWorkflowSpec,
+  optimizeSpecProposals,
+  proposeSpecMutation,
+  restoreRollbackSnapshot,
+} from "../api/client";
+import GraphView from "./GraphView";
 import type {
   ApplyProposalResponse,
   GraphNode,
   MutationProposalResponse,
+  OptimizationCandidate,
+  OptimizeProposalsResponse,
   ProposalEvaluationResponse,
+  RestoreRollbackResponse,
+  RollbackPreviewResponse,
   Topology,
   WorkflowSpecResponse,
 } from "../types";
 
-type InspectorTab = "node" | "source" | "validation" | "propose";
+type InspectorTab = "node" | "source" | "validation" | "propose" | "rollback";
 
 function formatValue(value: unknown): string {
   if (value == null || value === "") return "-";
@@ -71,6 +87,15 @@ function nodeFields(node: GraphNode): Array<{ label: string; value: unknown; mon
       { label: "Approval State Key", value: m.approval_state_key, mono: true },
       { label: "Approved Target", value: m.approved_target, mono: true },
       { label: "Rejected Target", value: m.rejected_target, mono: true },
+    ];
+  }
+  if (node.kind === "subgraph") {
+    return [
+      ...base,
+      { label: "Referenced Workflow", value: m.workflow, mono: true },
+      { label: "Description", value: node.description || m.description, pre: true },
+      { label: "Input Mapping", value: m.inputs, mono: true, pre: true },
+      { label: "Output Mapping", value: m.outputs, mono: true, pre: true },
     ];
   }
   if (node.kind === "gate") {
@@ -160,20 +185,77 @@ export default function SpecInspector({
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evalRunsPerFixture, setEvalRunsPerFixture] = useState(1);
   const [evalCostCap, setEvalCostCap] = useState(2);
+  const [candidateCount, setCandidateCount] = useState(3);
+  const [optimizationRunsPerFixture, setOptimizationRunsPerFixture] = useState(1);
+  const [optimizationCostCap, setOptimizationCostCap] = useState(5);
+  const [optimization, setOptimization] = useState<OptimizeProposalsResponse | undefined>(undefined);
+  const [optimizationError, setOptimizationError] = useState<string | undefined>(undefined);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | undefined>(undefined);
   const [applyConfirmed, setApplyConfirmed] = useState(false);
   const [applyResult, setApplyResult] = useState<ApplyProposalResponse | undefined>(undefined);
   const [applyError, setApplyError] = useState<string | undefined>(undefined);
   const [isApplying, setIsApplying] = useState(false);
+  const [selectedRollbackId, setSelectedRollbackId] = useState<string | undefined>(undefined);
+  const [rollbackPreview, setRollbackPreview] = useState<RollbackPreviewResponse | undefined>(undefined);
+  const [rollbackPreviewError, setRollbackPreviewError] = useState<string | undefined>(undefined);
+  const [isLoadingRollbackPreview, setIsLoadingRollbackPreview] = useState(false);
+  const [rollbackConfirmed, setRollbackConfirmed] = useState(false);
+  const [rollbackResult, setRollbackResult] = useState<RestoreRollbackResponse | undefined>(undefined);
+  const [rollbackError, setRollbackError] = useState<string | undefined>(undefined);
+  const [isRestoringRollback, setIsRestoringRollback] = useState(false);
+  const [openedChildWorkflow, setOpenedChildWorkflow] = useState<string | undefined>(undefined);
+
+  const selectedSubgraphWorkflow =
+    selectedNode?.kind === "subgraph" && typeof selectedNode.metadata?.workflow === "string"
+      ? selectedNode.metadata.workflow
+      : undefined;
+  const childWorkflow = openedChildWorkflow && openedChildWorkflow === selectedSubgraphWorkflow ? openedChildWorkflow : undefined;
+  const childTopology = useQuery({
+    queryKey: ["child-topology", childWorkflow],
+    queryFn: () => fetchTopology(childWorkflow!),
+    enabled: Boolean(childWorkflow),
+    staleTime: Infinity,
+    refetchInterval: false,
+  });
+  const childSpec = useQuery({
+    queryKey: ["child-spec", childWorkflow],
+    queryFn: () => fetchWorkflowSpec(childWorkflow!),
+    enabled: Boolean(childWorkflow),
+    staleTime: Infinity,
+    refetchInterval: false,
+  });
+  const rollbackSnapshots = useQuery({
+    queryKey: ["rollback-snapshots", spec?.workflow],
+    queryFn: () => fetchRollbackSnapshots(spec!.workflow),
+    enabled: Boolean(spec?.workflow) && tab === "rollback",
+    staleTime: 0,
+    refetchInterval: false,
+  });
 
   useEffect(() => {
     setProposal(undefined);
     setProposalError(undefined);
     setEvaluation(undefined);
     setEvaluationError(undefined);
+    setOptimization(undefined);
+    setOptimizationError(undefined);
+    setSelectedCandidateId(undefined);
     setApplyConfirmed(false);
     setApplyResult(undefined);
     setApplyError(undefined);
+    setSelectedRollbackId(undefined);
+    setRollbackPreview(undefined);
+    setRollbackPreviewError(undefined);
+    setRollbackConfirmed(false);
+    setRollbackResult(undefined);
+    setRollbackError(undefined);
+    setOpenedChildWorkflow(undefined);
   }, [spec?.workflow]);
+
+  useEffect(() => {
+    setOpenedChildWorkflow(undefined);
+  }, [selectedNodeId]);
 
   async function submitProposal() {
     if (!spec || !goal.trim()) return;
@@ -182,6 +264,9 @@ export default function SpecInspector({
     setProposalError(undefined);
     setEvaluation(undefined);
     setEvaluationError(undefined);
+    setOptimization(undefined);
+    setOptimizationError(undefined);
+    setSelectedCandidateId(undefined);
     setApplyConfirmed(false);
     setApplyResult(undefined);
     setApplyError(undefined);
@@ -218,16 +303,49 @@ export default function SpecInspector({
     }
   }
 
-  async function submitApply() {
-    if (!spec || !proposal || proposal.status !== "valid" || !applyConfirmed) return;
+  async function submitOptimization() {
+    if (!spec || !goal.trim()) return;
+    setIsOptimizing(true);
+    setOptimization(undefined);
+    setOptimizationError(undefined);
+    setSelectedCandidateId(undefined);
+    setApplyConfirmed(false);
+    setApplyResult(undefined);
+    setApplyError(undefined);
+    try {
+      const result = await optimizeSpecProposals(spec.workflow, {
+        goal,
+        constraints,
+        candidate_count: candidateCount,
+        n_per_fixture: optimizationRunsPerFixture,
+        max_cost_usd: optimizationCostCap,
+      });
+      setOptimization(result);
+      setSelectedCandidateId(
+        result.recommended_candidate_id ??
+          result.candidates.find((candidate) => candidate.status === "valid")?.candidate_id
+      );
+    } catch (error) {
+      setOptimizationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsOptimizing(false);
+    }
+  }
+
+  async function submitApply(candidate?: OptimizationCandidate) {
+    if (!spec || !applyConfirmed) return;
+    const proposedYaml = candidate?.proposed_yaml ?? proposal?.proposed_yaml;
+    const summary = candidate?.summary ?? proposal?.summary;
+    const evaluationArtifact = candidate?.run_artifact ?? evaluation?.run_artifact ?? null;
+    if (!proposedYaml || (candidate ? candidate.status !== "valid" : proposal?.status !== "valid")) return;
     setIsApplying(true);
     setApplyResult(undefined);
     setApplyError(undefined);
     try {
       const result = await applySpecProposal(spec.workflow, {
-        proposed_yaml: proposal.proposed_yaml,
-        proposal_summary: proposal.summary,
-        evaluation_artifact: evaluation?.run_artifact ?? null,
+        proposed_yaml: proposedYaml,
+        proposal_summary: summary,
+        evaluation_artifact: evaluationArtifact,
         accepted_by: "local-user",
       });
       setApplyResult(result);
@@ -239,6 +357,48 @@ export default function SpecInspector({
     }
   }
 
+  async function selectRollbackSnapshot(snapshotId: string) {
+    if (!spec) return;
+    setSelectedRollbackId(snapshotId);
+    setRollbackPreview(undefined);
+    setRollbackPreviewError(undefined);
+    setRollbackConfirmed(false);
+    setRollbackResult(undefined);
+    setRollbackError(undefined);
+    setIsLoadingRollbackPreview(true);
+    try {
+      const result = await fetchRollbackPreview(spec.workflow, snapshotId);
+      setRollbackPreview(result);
+    } catch (error) {
+      setRollbackPreviewError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsLoadingRollbackPreview(false);
+    }
+  }
+
+  async function submitRollbackRestore() {
+    if (!spec || !selectedRollbackId || !rollbackConfirmed || isRestoringRollback) return;
+    setIsRestoringRollback(true);
+    setRollbackError(undefined);
+    setRollbackResult(undefined);
+    try {
+      const result = await restoreRollbackSnapshot(spec.workflow, selectedRollbackId, {
+        accepted_by: "local-user",
+      });
+      setRollbackResult(result);
+      setRollbackConfirmed(false);
+      await Promise.all([rollbackSnapshots.refetch(), onApplied?.()]);
+    } catch (error) {
+      setRollbackError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsRestoringRollback(false);
+    }
+  }
+
+  const selectedCandidate = optimization?.candidates.find(
+    (candidate) => candidate.candidate_id === selectedCandidateId
+  );
+
   return (
     <div className="h-full flex flex-col bg-white">
       <div className="border-b px-3 py-2">
@@ -246,7 +406,7 @@ export default function SpecInspector({
         <div className="text-sm font-semibold text-slate-800">{spec?.workflow ?? topology?.name ?? "-"}</div>
       </div>
       <div className="border-b flex text-xs">
-        {(["node", "source", "validation", "propose"] as InspectorTab[]).map((item) => (
+        {(["node", "source", "validation", "propose", "rollback"] as InspectorTab[]).map((item) => (
           <button
             key={item}
             type="button"
@@ -265,6 +425,42 @@ export default function SpecInspector({
           <div className="space-y-3">
             {!selectedNode && <div className="text-sm text-slate-500">Select a graph node to inspect its source metadata.</div>}
             {selectedNode && nodeFields(selectedNode).map((field) => <Field key={field.label} {...field} />)}
+            {selectedSubgraphWorkflow && (
+              <div className="space-y-3 rounded border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs text-slate-700">
+                  Subgraph v1 supports acyclic, non-approval child workflows. Nested approval resume is deferred.
+                </div>
+                <button
+                  type="button"
+                  className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800"
+                  onClick={() =>
+                    setOpenedChildWorkflow(
+                      openedChildWorkflow === selectedSubgraphWorkflow ? undefined : selectedSubgraphWorkflow
+                    )
+                  }
+                >
+                  {openedChildWorkflow === selectedSubgraphWorkflow ? "Close child graph" : "Open child graph"}
+                </button>
+                {childWorkflow && (
+                  <div className="space-y-3">
+                    {childTopology.isLoading && <div className="text-xs text-slate-500">Loading child graph...</div>}
+                    {childTopology.error && <div className="text-xs text-red-700">Error loading child graph.</div>}
+                    {childTopology.data && (
+                      <div className="h-72 rounded border border-slate-200 bg-white">
+                        <GraphView topology={childTopology.data} nodeMetrics={{}} />
+                      </div>
+                    )}
+                    {childSpec.data && (
+                      <div className="space-y-2">
+                        <Field label="Child Source Path" value={childSpec.data.source_path} mono />
+                        <Field label="Child Entry" value={childSpec.data.spec.entry} mono />
+                        <Field label="Child Budget" value={childSpec.data.spec.budget} mono pre />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
         {tab === "source" && (
@@ -277,6 +473,11 @@ export default function SpecInspector({
             <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
               {spec ? "Validated by GraphSpec." : "Spec has not loaded."}
             </div>
+            {spec?.spec.nodes.some((node) => node.kind === "subgraph") && (
+              <div className="rounded border border-violet-200 bg-violet-50 p-3 text-xs text-violet-950">
+                Subgraph validation checks referenced workflow files and cycles. M5.2 still limits child workflows to acyclic, non-approval specs.
+              </div>
+            )}
             <Field label="Source Path" value={spec?.source_path ?? "-"} mono />
             <Field label="Schema Version" value={spec?.spec.schema_version ?? "-"} mono />
             <Field label="Entry Node" value={spec?.spec.entry ?? "-"} mono />
@@ -284,6 +485,97 @@ export default function SpecInspector({
             <Field label="Node Count" value={spec?.spec.nodes.length ?? 0} />
             <Field label="Edge Count" value={spec?.spec.edges.length ?? 0} />
             <Field label="Loop Count" value={spec?.spec.loops.length ?? 0} />
+          </div>
+        )}
+        {tab === "rollback" && (
+          <div className="space-y-3 text-sm">
+            <div className="rounded border border-sky-200 bg-sky-50 p-3 text-sky-950">
+              Rollback restores are validated, human-confirmed, and create a new audit snapshot before writing the canonical YAML.
+            </div>
+            {rollbackSnapshots.isLoading && <div className="text-xs text-slate-500">Loading rollback snapshots...</div>}
+            {rollbackSnapshots.error && (
+              <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                Error loading rollback snapshots.
+              </div>
+            )}
+            {rollbackSnapshots.data?.snapshots.length === 0 && (
+              <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                No rollback snapshots found for this workflow.
+              </div>
+            )}
+            {rollbackSnapshots.data && rollbackSnapshots.data.snapshots.length > 0 && (
+              <div className="space-y-2">
+                {rollbackSnapshots.data.snapshots.map((snapshot) => {
+                  const selected = snapshot.snapshot_id === selectedRollbackId;
+                  return (
+                    <button
+                      key={snapshot.snapshot_id}
+                      type="button"
+                      className={[
+                        "w-full rounded border p-3 text-left text-xs",
+                        selected ? "border-sky-500 bg-white" : "border-sky-200 bg-sky-50",
+                      ].join(" ")}
+                      onClick={() => selectRollbackSnapshot(snapshot.snapshot_id)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-mono font-medium">{snapshot.snapshot_id}</div>
+                        <div>{snapshot.created_at}</div>
+                      </div>
+                      <div className="text-slate-700">{snapshot.proposal_summary || "No summary recorded."}</div>
+                      <div className="font-mono text-[11px] text-slate-500">
+                        by {snapshot.accepted_by} | {snapshot.rollback_path}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {isLoadingRollbackPreview && <div className="text-xs text-slate-500">Loading rollback preview...</div>}
+            {rollbackPreviewError && (
+              <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                {rollbackPreviewError}
+              </div>
+            )}
+            {rollbackPreview && (
+              <div className="space-y-3 rounded border border-sky-200 bg-white p-3">
+                <div className="text-xs font-medium text-slate-800">Rollback preview</div>
+                <Field label="Snapshot" value={rollbackPreview.snapshot_id} mono />
+                <Field label="Diff" value={rollbackPreview.diff || "No changes."} mono pre />
+                <Field label="Rollback YAML" value={rollbackPreview.rollback_yaml} mono pre />
+                <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
+                  <label className="flex items-start gap-2 text-xs text-slate-700">
+                    <input
+                      className="mt-0.5"
+                      type="checkbox"
+                      checked={rollbackConfirmed}
+                      onChange={(event) => setRollbackConfirmed(event.target.checked)}
+                    />
+                    <span>I reviewed this rollback snapshot and want to restore it as the canonical workflow YAML.</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="rounded border border-sky-900 bg-sky-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                    disabled={!rollbackConfirmed || isRestoringRollback}
+                    onClick={submitRollbackRestore}
+                  >
+                    {isRestoringRollback ? "Restoring..." : "Restore snapshot"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {rollbackError && (
+              <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                {rollbackError}
+              </div>
+            )}
+            {rollbackResult && (
+              <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                <div className="font-medium">Restored {rollbackResult.snapshot_id}</div>
+                <Field label="Source Path" value={rollbackResult.source_path} mono />
+                <Field label="Audit Path" value={rollbackResult.audit_path} mono />
+                <Field label="Rollback Snapshot" value={rollbackResult.rollback_path} mono />
+              </div>
+            )}
           </div>
         )}
         {tab === "propose" && (
@@ -321,6 +613,140 @@ export default function SpecInspector({
                 {proposalError}
               </div>
             )}
+            <div className="space-y-3 rounded border border-blue-200 bg-blue-50 p-3">
+              <div className="text-xs font-medium text-blue-950">Optimize candidates</div>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="space-y-1">
+                  <div className="text-[11px] uppercase tracking-wide text-blue-700">Candidates</div>
+                  <input
+                    className="w-full rounded border border-blue-200 p-1.5 text-xs"
+                    type="number"
+                    min={2}
+                    max={5}
+                    value={candidateCount}
+                    onChange={(event) => setCandidateCount(Number(event.target.value))}
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-[11px] uppercase tracking-wide text-blue-700">Runs / Fixture</div>
+                  <input
+                    className="w-full rounded border border-blue-200 p-1.5 text-xs"
+                    type="number"
+                    min={1}
+                    max={8}
+                    value={optimizationRunsPerFixture}
+                    onChange={(event) => setOptimizationRunsPerFixture(Number(event.target.value))}
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-[11px] uppercase tracking-wide text-blue-700">Cost Cap USD</div>
+                  <input
+                    className="w-full rounded border border-blue-200 p-1.5 text-xs"
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={optimizationCostCap}
+                    onChange={(event) => setOptimizationCostCap(Number(event.target.value))}
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                className="rounded border border-blue-900 bg-blue-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                disabled={!spec || !goal.trim() || isOptimizing}
+                onClick={submitOptimization}
+              >
+                {isOptimizing ? "Optimizing..." : "Optimize candidates"}
+              </button>
+              {optimizationError && (
+                <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  {optimizationError}
+                </div>
+              )}
+              {optimization && (
+                <div className="space-y-3">
+                  <div
+                    className={[
+                      "rounded border p-3 text-xs",
+                      optimization.status === "ok"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                        : "border-amber-200 bg-amber-50 text-amber-900",
+                    ].join(" ")}
+                  >
+                    <div className="font-medium">Optimization status: {optimization.status}</div>
+                    <div>
+                      Recommended:{" "}
+                      <span className="font-mono">{optimization.recommended_candidate_id ?? "no recommendation"}</span>
+                    </div>
+                    <div className="font-mono text-[11px]">{optimization.report_artifact}</div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {optimization.candidates.map((candidate) => {
+                      const overall = candidate.eval?.overall ?? {};
+                      const selected = candidate.candidate_id === selectedCandidateId;
+                      return (
+                        <button
+                          key={candidate.candidate_id}
+                          type="button"
+                          className={[
+                            "text-left rounded border p-3 text-xs",
+                            selected ? "border-blue-500 bg-white" : "border-blue-200 bg-blue-50",
+                          ].join(" ")}
+                          onClick={() => setSelectedCandidateId(candidate.candidate_id)}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium">
+                              {candidate.candidate_id}
+                              {candidate.recommended ? " | recommended" : ""}
+                            </div>
+                            <div>{candidate.status}</div>
+                          </div>
+                          <div className="text-slate-700">{candidate.summary}</div>
+                          <div className="font-mono text-[11px] text-slate-600">
+                            rank {candidate.rank ?? "-"} | pass{" "}
+                            {typeof overall.pass_rate === "number" ? `${(overall.pass_rate * 100).toFixed(1)}%` : "-"} | cost{" "}
+                            {typeof overall.mean_cost_usd === "number" ? `$${overall.mean_cost_usd.toFixed(4)}` : "-"} | latency{" "}
+                            {typeof overall.mean_latency_ms === "number" ? `${overall.mean_latency_ms.toFixed(0)}ms` : "-"}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedCandidate && (
+                    <div className="space-y-3 rounded border border-blue-200 bg-white p-3">
+                      <div className="text-xs font-medium text-slate-800">Selected candidate</div>
+                      {selectedCandidate.validation_errors.length > 0 && (
+                        <Field label="Validation Errors" value={selectedCandidate.validation_errors} mono pre />
+                      )}
+                      <Field label="Eval" value={selectedCandidate.eval ?? {}} mono pre />
+                      <Field label="Diff" value={selectedCandidate.diff || "No changes proposed."} mono pre />
+                      <Field label="Proposed YAML" value={selectedCandidate.proposed_yaml} mono pre />
+                      {selectedCandidate.status === "valid" && (
+                        <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
+                          <label className="flex items-start gap-2 text-xs text-slate-700">
+                            <input
+                              className="mt-0.5"
+                              type="checkbox"
+                              checked={applyConfirmed}
+                              onChange={(event) => setApplyConfirmed(event.target.checked)}
+                            />
+                            <span>I reviewed this candidate and want to write it to the canonical workflow file.</span>
+                          </label>
+                          <button
+                            type="button"
+                            className="rounded border border-slate-300 bg-slate-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                            disabled={!applyConfirmed || isApplying}
+                            onClick={() => submitApply(selectedCandidate)}
+                          >
+                            {isApplying ? "Applying..." : "Apply selected candidate"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             {proposal && (
               <div className="space-y-3">
                 <div
@@ -428,7 +854,7 @@ export default function SpecInspector({
                         type="button"
                         className="rounded border border-slate-300 bg-slate-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
                         disabled={!applyConfirmed || isApplying}
-                        onClick={submitApply}
+                        onClick={() => submitApply()}
                       >
                         {isApplying ? "Applying..." : "Apply proposal"}
                       </button>

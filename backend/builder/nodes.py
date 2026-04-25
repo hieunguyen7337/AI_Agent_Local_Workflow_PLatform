@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class NodeConfig(BaseModel):
@@ -89,6 +89,30 @@ class ApprovalNodeConfig(NodeConfig):
     approval_state_key: str = "approval_decision"
     approved_target: str
     rejected_target: str
+
+
+class SubgraphNodeConfig(NodeConfig):
+    """Reusable workflow node that executes another YAML workflow."""
+
+    kind: Literal["subgraph"] = "subgraph"
+    workflow: str
+    inputs: dict[str, str] = Field(..., min_length=1)
+    outputs: dict[str, str] = Field(..., min_length=1)
+
+    @field_validator("workflow")
+    @classmethod
+    def _workflow_required(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("workflow is required")
+        return value
+
+    @field_validator("inputs", "outputs")
+    @classmethod
+    def _mapping_values_required(cls, value: dict[str, str]) -> dict[str, str]:
+        for source, target in value.items():
+            if not str(source).strip() or not str(target).strip():
+                raise ValueError("subgraph mappings require non-empty string keys and values")
+        return value
 
 
 class LoopConfig(BaseModel):

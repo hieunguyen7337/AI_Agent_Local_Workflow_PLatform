@@ -3,12 +3,20 @@ import { useQuery } from "@tanstack/react-query";
 import GraphView from "./components/GraphView";
 import RunList from "./components/RunList";
 import RunDetail from "./components/RunDetail";
+import ApprovalWorkbench from "./components/ApprovalWorkbench";
 import SpecInspector from "./components/SpecInspector";
 import { fetchNodeMetrics, fetchTopology, fetchWorkflowSpec } from "./api/client";
 import { useLiveUpdates } from "./live/useLiveUpdates";
 
-const WORKFLOWS = ["coder_tester", "linear_rag", "supervisor_loop", "dispatch_aggregate", "approval_review"] as const;
-type InspectorTab = "node" | "source" | "validation" | "propose";
+const WORKFLOWS = [
+  "coder_tester",
+  "linear_rag",
+  "supervisor_loop",
+  "dispatch_aggregate",
+  "approval_review",
+  "rag_subgraph_wrapper",
+] as const;
+type InspectorTab = "node" | "source" | "validation" | "propose" | "rollback";
 
 export default function App() {
   const [workflow, setWorkflow] = useState<(typeof WORKFLOWS)[number]>("coder_tester");
@@ -94,9 +102,13 @@ export default function App() {
           <div className="px-3 py-2 text-xs uppercase text-gray-500">Recent runs</div>
           <RunList workflow={workflow} onSelect={(r) => setSelectedRun(r.run_id)} selected={selectedRun} />
         </div>
+        <div className="border-b h-[220px] flex-none overflow-hidden">
+          <div className="px-3 py-2 text-xs uppercase text-gray-500">Approvals</div>
+          <ApprovalWorkbench onSelectRun={setSelectedRun} selectedRun={selectedRun} />
+        </div>
         <div className="flex-1 overflow-hidden">
           {selectedRun ? (
-            <RunDetail runId={selectedRun} />
+            <RunDetail runId={selectedRun} onSelectRun={setSelectedRun} />
           ) : (
             <div className="p-4 text-sm text-gray-500">Select a run to see details.</div>
           )}

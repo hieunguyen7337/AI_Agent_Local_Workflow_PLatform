@@ -9,7 +9,7 @@ from backend.evals.harness import run_eval
 from backend.providers import openai as oai
 from backend.providers.base import LLMResponse, Usage
 from backend.runtime.executor import run_graph
-from backend.workflows import dispatch_aggregate
+from backend.graphspec import load_workflow_metadata
 
 
 class _Replies:
@@ -51,7 +51,7 @@ class _DispatchReplies:
 
 
 def test_dispatch_aggregate_compile_shape():
-    metadata = dispatch_aggregate.build_compiled()
+    metadata = load_workflow_metadata("dispatch_aggregate")
     assert metadata.entry == "dispatcher"
     assert metadata.loops == []
     assert metadata.node_ids() == ["dispatcher", "specialist_a", "specialist_b", "aggregator"]
@@ -77,7 +77,7 @@ def test_dispatch_aggregate_runtime_and_eval(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(oai, "stream_openai", _DispatchReplies())
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
-    metadata = dispatch_aggregate.build_compiled()
+    metadata = load_workflow_metadata("dispatch_aggregate")
     run = run_graph(
         metadata,
         user_input="Explain why local-first workflow tools matter in 2-3 sentences. Include the exact phrase 'fast feedback and audit trail'.",

@@ -18,6 +18,7 @@ class WorkflowState(TypedDict, total=False):
     retrieved_context: str
     reranked_context: str
     final_answer: str
+    rag_answer: str
     draft_answer: str
     supervisor_route: str
     research_notes: str
@@ -27,6 +28,7 @@ class WorkflowState(TypedDict, total=False):
     retrieved_doc_ids: list[str]
     _test_code: str
     tester_mode: str
+    approval_decision: str
     pending_approval: dict[str, Any]
 
     iteration_counts: dict[str, int]
@@ -47,6 +49,7 @@ def new_state(user_input: str) -> WorkflowState:
         retrieved_context="",
         reranked_context="",
         final_answer="",
+        rag_answer="",
         draft_answer="",
         supervisor_route="",
         research_notes="",
@@ -56,6 +59,7 @@ def new_state(user_input: str) -> WorkflowState:
         retrieved_doc_ids=[],
         _test_code="",
         tester_mode="",
+        approval_decision="",
         pending_approval={},
         iteration_counts={},
         cost_usd_accum=0.0,

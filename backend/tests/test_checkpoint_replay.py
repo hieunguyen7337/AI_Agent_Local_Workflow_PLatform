@@ -7,17 +7,17 @@ from pathlib import Path
 import pytest
 
 from backend.checkpointing.replay import (
-    apply_overrides,
+    apply_metadata_overrides,
     migrate_snapshot_state,
     parse_set_arg,
     replay as do_replay,
     resolve_replay_boundary,
 )
+from backend.graphspec import load_workflow_metadata
 from backend.providers import openrouter as orouter
 from backend.providers.base import LLMResponse, Usage
 from backend.runtime.errors import ReplayError
 from backend.runtime.executor import run_graph
-from backend.workflows import coder_tester
 
 
 class _Replies:
@@ -45,12 +45,13 @@ def test_parse_set_arg_coerces_types():
     assert out == {"a": {"b": True, "c": 42, "d": 3.14, "e": "hello"}}
 
 
-def test_apply_overrides_updates_config():
-    b = coder_tester.build()
-    original_prompt = b._nodes["coder"].user_prompt_template
-    apply_overrides(b, {"coder": {"user_prompt_template": "NEW"}})
-    assert b._nodes["coder"].user_prompt_template == "NEW"
-    assert b._nodes["coder"].user_prompt_template != original_prompt
+def test_apply_metadata_overrides_updates_config():
+    metadata = load_workflow_metadata("coder_tester")
+    original_prompt = metadata.nodes["coder"].user_prompt_template
+    updated = apply_metadata_overrides(metadata, {"coder": {"user_prompt_template": "NEW"}})
+    assert updated.nodes["coder"].user_prompt_template == "NEW"
+    assert updated.nodes["coder"].user_prompt_template != original_prompt
+    assert metadata.nodes["coder"].user_prompt_template == original_prompt
 
 
 def test_resolve_replay_boundary_picks_latest_matching_node(monkeypatch, tmp_path: Path):
@@ -70,13 +71,13 @@ def test_resolve_replay_boundary_picks_latest_matching_node(monkeypatch, tmp_pat
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     source = run_graph(
-        coder_tester.build_compiled(),
+        load_workflow_metadata("coder_tester"),
         user_input="write f",
         expected="a function",
         runs_root=runs_root,
     )
     boundary = resolve_replay_boundary(
-        coder_tester.build_compiled(),
+        load_workflow_metadata("coder_tester"),
         source_run_id=source.run_id,
         at="coder",
         runs_root=runs_root,
@@ -101,7 +102,7 @@ def test_replay_forks_new_run_and_preserves_source_dir(monkeypatch, tmp_path: Pa
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     source = run_graph(
-        coder_tester.build_compiled(),
+        load_workflow_metadata("coder_tester"),
         user_input="write fizzbuzz",
         expected="python code",
         runs_root=runs_root,
@@ -149,7 +150,7 @@ def test_replay_from_mid_graph_node_runs_only_downstream_nodes(monkeypatch, tmp_
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     source = run_graph(
-        coder_tester.build_compiled(),
+        load_workflow_metadata("coder_tester"),
         user_input="write add",
         expected="python code",
         runs_root=runs_root,
@@ -176,12 +177,8 @@ def test_replay_from_mid_graph_node_runs_only_downstream_nodes(monkeypatch, tmp_
 
 
 def test_migrate_snapshot_state_preserves_legacy_keys():
-    class _Workflow:
-        pass
-
     migrated = migrate_snapshot_state(
         {"user_input": "q", "coder_output": "print(1)", "legacy_only": "old"},
-        workflow_module=_Workflow(),
         source_run_id="run_old",
         replay_from_node="coder",
         user_input="q",
@@ -190,24 +187,6 @@ def test_migrate_snapshot_state_preserves_legacy_keys():
     assert migrated["coder_output"] == "print(1)"
     assert migrated["plan"] == ""
     assert migrated["artifacts"]["_legacy_state"]["legacy_only"] == "old"
-
-
-def test_migrate_snapshot_state_allows_workflow_hook_for_renames():
-    class _Workflow:
-        @staticmethod
-        def migrate_replay_state(snapshot_state, *, source_run_id, replay_from_node):
-            return {"final_answer": snapshot_state["legacy_answer"]}
-
-    migrated = migrate_snapshot_state(
-        {"user_input": "q", "legacy_answer": "42"},
-        workflow_module=_Workflow(),
-        source_run_id="run_old",
-        replay_from_node="synthesiser",
-        user_input="q",
-        user_input_locked=False,
-    )
-    assert migrated["final_answer"] == "42"
-    assert migrated["artifacts"]["_legacy_state"]["legacy_answer"] == "42"
 
 
 def test_replay_invalid_node_fails_cleanly(monkeypatch, tmp_path: Path):
@@ -225,7 +204,7 @@ def test_replay_invalid_node_fails_cleanly(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     source = run_graph(
-        coder_tester.build_compiled(),
+        load_workflow_metadata("coder_tester"),
         user_input="write f",
         expected="a function",
         runs_root=runs_root,

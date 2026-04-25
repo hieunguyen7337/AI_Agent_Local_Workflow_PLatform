@@ -5,8 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.builder.api import END
-from backend.graphspec import GraphSpec, graph_spec_to_metadata, load_graph_spec
-from backend.workflows import coder_tester, dispatch_aggregate, linear_rag, supervisor_loop
+from backend.graphspec import GraphSpec, graph_spec_to_metadata, load_graph_spec, load_workflow_metadata
 
 
 def _shape(metadata):
@@ -39,6 +38,16 @@ def test_loads_approval_graph_spec():
     assert approval.rejected_target == END
 
 
+def test_loads_subgraph_graph_spec():
+    spec = load_graph_spec("rag_subgraph_wrapper")
+    assert spec.name == "rag_subgraph_wrapper"
+    subgraph = next(node for node in spec.nodes if node.id == "rag_child")
+    assert subgraph.kind == "subgraph"
+    assert subgraph.workflow == "linear_rag"
+    assert subgraph.inputs == {"user_input": "user_input"}
+    assert subgraph.outputs == {"final_answer": "rag_answer"}
+
+
 def test_graph_spec_converts_to_metadata():
     metadata = graph_spec_to_metadata(load_graph_spec("linear_rag"))
     assert metadata.name == "linear_rag"
@@ -46,16 +55,75 @@ def test_graph_spec_converts_to_metadata():
     assert metadata.nodes["retriever"].kind == "retriever"
 
 
-def test_yaml_workflow_shapes_match_python_builders():
+def test_missing_workflow_metadata_requires_yaml_spec():
+    with pytest.raises(FileNotFoundError, match="workflow spec .*does not exist"):
+        load_workflow_metadata("does_not_exist")
+
+
+def test_canonical_yaml_workflow_shapes():
     expected = {
-        "coder_tester": coder_tester.build_compiled(),
-        "linear_rag": linear_rag.build_compiled(),
-        "supervisor_loop": supervisor_loop.build_compiled(),
-        "dispatch_aggregate": dispatch_aggregate.build_compiled(),
+        "coder_tester": {
+            "name": "coder_tester",
+            "budget": (0.5, 300000.0),
+            "entry": "planner",
+            "nodes": {"planner": "llm", "coder": "llm", "tester": "tester", "gate": "gate"},
+            "edges": [("coder", "tester"), ("planner", "coder"), ("tester", "gate")],
+            "loops": [("gate", "coder", 3)],
+        },
+        "linear_rag": {
+            "name": "linear_rag",
+            "budget": (0.5, 240000.0),
+            "entry": "query_analyser",
+            "nodes": {
+                "query_analyser": "llm",
+                "retriever": "retriever",
+                "reranker": "llm",
+                "synthesiser": "llm",
+            },
+            "edges": [
+                ("query_analyser", "retriever"),
+                ("reranker", "synthesiser"),
+                ("retriever", "reranker"),
+                ("synthesiser", END),
+            ],
+            "loops": [],
+        },
+        "supervisor_loop": {
+            "name": "supervisor_loop",
+            "budget": (0.6, 300000.0),
+            "entry": "supervisor",
+            "nodes": {
+                "supervisor": "llm",
+                "dispatch": "router",
+                "researcher": "llm",
+                "writer": "llm",
+            },
+            "edges": [("supervisor", "dispatch")],
+            "loops": [("researcher", "supervisor", 4), ("writer", "supervisor", 4)],
+        },
+        "dispatch_aggregate": {
+            "name": "dispatch_aggregate",
+            "budget": (0.6, 300000.0),
+            "entry": "dispatcher",
+            "nodes": {
+                "dispatcher": "llm",
+                "specialist_a": "llm",
+                "specialist_b": "llm",
+                "aggregator": "llm",
+            },
+            "edges": [
+                ("aggregator", END),
+                ("dispatcher", "specialist_a"),
+                ("dispatcher", "specialist_b"),
+                ("specialist_a", "aggregator"),
+                ("specialist_b", "aggregator"),
+            ],
+            "loops": [],
+        },
     }
-    for workflow, python_metadata in expected.items():
+    for workflow, shape in expected.items():
         yaml_metadata = graph_spec_to_metadata(load_graph_spec(workflow))
-        assert _shape(yaml_metadata) == _shape(python_metadata)
+        assert _shape(yaml_metadata) == shape
 
 
 def test_graph_spec_rejects_duplicate_node_ids():
@@ -194,3 +262,115 @@ def test_graph_spec_rejects_unsupported_node_kind():
                 "nodes": [{"id": "a", "kind": "unknown"}],
             }
         )
+
+
+def test_graph_spec_rejects_empty_subgraph_mappings():
+    with pytest.raises(ValidationError, match="Dictionary should have at least 1 item"):
+        GraphSpec.model_validate(
+            {
+                "name": "bad",
+                "budget": {"cost_usd": 0.1, "latency_ms": 1000},
+                "entry": "child",
+                "nodes": [
+                    {
+                        "id": "child",
+                        "kind": "subgraph",
+                        "workflow": "linear_rag",
+                        "inputs": {},
+                        "outputs": {"final_answer": "rag_answer"},
+                    }
+                ],
+            }
+        )
+
+
+def test_load_graph_spec_rejects_missing_subgraph_workflow(tmp_path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "parent.yaml").write_text(
+        """
+name: parent
+budget:
+  cost_usd: 0.1
+  latency_ms: 1000
+entry: child
+nodes:
+  - id: child
+    kind: subgraph
+    workflow: missing_child
+    inputs:
+      user_input: user_input
+    outputs:
+      final_answer: answer
+""".strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(FileNotFoundError, match="subgraph workflow 'missing_child' does not exist"):
+        load_graph_spec("parent", specs_root=specs_root)
+
+
+def test_load_graph_spec_rejects_subgraph_cycles(tmp_path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    for name, child in (("a", "b"), ("b", "a")):
+        (specs_root / f"{name}.yaml").write_text(
+            f"""
+name: {name}
+budget:
+  cost_usd: 0.1
+  latency_ms: 1000
+entry: child
+nodes:
+  - id: child
+    kind: subgraph
+    workflow: {child}
+    inputs:
+      user_input: user_input
+    outputs:
+      final_answer: answer
+""".strip(),
+            encoding="utf-8",
+        )
+    with pytest.raises(ValueError, match="subgraph reference cycle detected: a -> b -> a"):
+        load_graph_spec("a", specs_root=specs_root)
+
+
+def test_load_graph_spec_rejects_approval_subgraph_targets(tmp_path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "parent.yaml").write_text(
+        """
+name: parent
+budget:
+  cost_usd: 0.1
+  latency_ms: 1000
+entry: child
+nodes:
+  - id: child
+    kind: subgraph
+    workflow: child
+    inputs:
+      user_input: user_input
+    outputs:
+      final_answer: answer
+""".strip(),
+        encoding="utf-8",
+    )
+    (specs_root / "child.yaml").write_text(
+        f"""
+name: child
+budget:
+  cost_usd: 0.1
+  latency_ms: 1000
+entry: review
+nodes:
+  - id: review
+    kind: approval
+    prompt: Review.
+    approved_target: {END}
+    rejected_target: {END}
+""".strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="nested approval subgraphs are not supported in v1"):
+        load_graph_spec("parent", specs_root=specs_root)

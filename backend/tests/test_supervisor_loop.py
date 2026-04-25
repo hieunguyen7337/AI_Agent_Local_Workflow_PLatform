@@ -9,7 +9,7 @@ from backend.evals.harness import run_eval
 from backend.providers import openai as oai
 from backend.providers.base import LLMResponse, Usage
 from backend.runtime.executor import run_graph
-from backend.workflows import supervisor_loop
+from backend.graphspec import load_workflow_metadata
 
 
 class _Replies:
@@ -23,7 +23,7 @@ class _Replies:
 
 
 def test_supervisor_loop_compile_shape():
-    metadata = supervisor_loop.build_compiled()
+    metadata = load_workflow_metadata("supervisor_loop")
     assert metadata.entry == "supervisor"
     assert metadata.node_ids() == ["supervisor", "dispatch", "researcher", "writer"]
     assert {loop.loop_id for loop in metadata.loops} == {
@@ -59,7 +59,7 @@ def test_supervisor_loop_runtime_and_eval(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(oai, "stream_openai", _Replies(replies))
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
-    metadata = supervisor_loop.build_compiled()
+    metadata = load_workflow_metadata("supervisor_loop")
     run = run_graph(
         metadata,
         user_input="Explain why workflow telemetry matters in 2-3 sentences. Include the exact phrase 'audit trail'.",

@@ -26,6 +26,8 @@ def make_approval_node(
     tracer = get_tracer()
 
     def _node(state: WorkflowState) -> dict:
+        if _has_decision(state, cfg.approval_state_key):
+            return {}
         created_ns = time.time_ns()
         approval = {
             "workflow": graph_name,
@@ -74,6 +76,22 @@ def make_approval_dispatcher(cfg: ApprovalNodeConfig) -> Callable[[WorkflowState
 
 def _write_approval(run_dir: Path, approval: dict) -> None:
     (run_dir / "approval.json").write_text(json.dumps(approval, indent=2), encoding="utf-8")
+
+
+def _has_decision(state: WorkflowState, approval_state_key: str) -> bool:
+    raw = str(state.get(approval_state_key, "") or "").strip().lower()
+    return raw in {
+        "approved",
+        "approve",
+        "pass",
+        "true",
+        "yes",
+        "rejected",
+        "reject",
+        "fail",
+        "false",
+        "no",
+    }
 
 
 def _review_state(state: WorkflowState) -> dict:

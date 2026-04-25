@@ -12,6 +12,7 @@ from backend.builder.nodes import (
     LLMNodeConfig,
     RetrieverNodeConfig,
     RouterNodeConfig,
+    SubgraphNodeConfig,
     TesterNodeConfig,
 )
 
@@ -21,7 +22,8 @@ GraphNodeSpec = Annotated[
     | RetrieverNodeConfig
     | GateNodeConfig
     | RouterNodeConfig
-    | ApprovalNodeConfig,
+    | ApprovalNodeConfig
+    | SubgraphNodeConfig,
     Field(discriminator="kind"),
 ]
 
