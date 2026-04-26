@@ -1,6 +1,10 @@
 schema_version: workflow.graph/v1
 name: rag_subgraph_wrapper
 description: Minimal wrapper that executes linear_rag as a reusable collapsed subgraph.
+category: subgraph
+tags:
+  - rag
+  - reusable
 budget:
   cost_usd: 0.75
   latency_ms: 300000

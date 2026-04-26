@@ -24,6 +24,8 @@ from backend.graphspec import (
     GraphSpec,
     apply_graph_spec_proposal,
     graph_spec_to_metadata,
+    list_workflow_ids,
+    load_graph_spec,
     load_graph_spec_source,
     load_workflow_metadata,
     list_rollback_snapshots,
@@ -169,6 +171,35 @@ def _topology_dict(metadata: GraphMetadata) -> dict:
         "edges": edges,
         "loops": loops,
     }
+
+
+@router.get("/api/workflows")
+def list_workflows() -> list[dict]:
+    ids = list_workflow_ids(specs_root=WORKFLOW_SPECS_ROOT)
+    result = []
+    for wid in ids:
+        try:
+            spec = load_graph_spec(wid, specs_root=WORKFLOW_SPECS_ROOT)
+            result.append(
+                {
+                    "id": wid,
+                    "name": spec.name,
+                    "description": spec.description,
+                    "category": spec.category,
+                    "tags": spec.tags,
+                }
+            )
+        except Exception:
+            result.append(
+                {
+                    "id": wid,
+                    "name": wid,
+                    "description": "",
+                    "category": "general",
+                    "tags": [],
+                }
+            )
+    return result
 
 
 @router.get("/api/graph/{workflow}")
@@ -510,7 +541,7 @@ def post_approval_decision(run_id: str, request: ApprovalDecisionRequest) -> dic
         raise HTTPException(400, str(exc))
     except OSError as exc:
         raise HTTPException(500, f"failed to record approval decision: {exc}")
-    return {
+    response: dict[str, Any] = {
         "source_run_id": result.source_run_id,
         "status": result.status,
         "decision": result.decision,
@@ -520,6 +551,18 @@ def post_approval_decision(run_id: str, request: ApprovalDecisionRequest) -> dic
         "continuation_run_dir": result.continuation_run_dir.as_posix(),
         "continuation_error": result.continuation_error,
     }
+    if result.parent_continuation_run_id is not None:
+        response["parent_run_id"] = result.parent_run_id
+        response["parent_workflow"] = result.parent_workflow
+        response["parent_subgraph_node_id"] = result.parent_subgraph_node_id
+        response["parent_continuation_run_id"] = result.parent_continuation_run_id
+        response["parent_continuation_status"] = result.parent_continuation_status
+        response["parent_continuation_run_dir"] = (
+            result.parent_continuation_run_dir.as_posix()
+            if result.parent_continuation_run_dir else None
+        )
+        response["parent_continuation_error"] = result.parent_continuation_error
+    return response
 
 
 def list_approval_data(*, runs_root: Path, status: str = "pending") -> list[dict[str, Any]]:
@@ -580,6 +623,7 @@ def list_runs_data(*, runs_root: Path, limit: int = 50) -> list[dict[str, Any]]:
                             "latency_ms": r[6],
                             "error": r[7],
                             **artifact_paths(d),
+                            **_approval_lifecycle(d),
                         }
                     )
         except sqlite3.OperationalError:
@@ -701,4 +745,96 @@ def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
             out["parent_run"] = parent
         except (OSError, json.JSONDecodeError):
             out["parent_run"] = None
+
+    # Nested approval subgraph artifacts (M5.8).
+    pending_subgraph_path = run_dir / "pending_subgraph_approval.json"
+    if pending_subgraph_path.exists():
+        try:
+            psa = json.loads(pending_subgraph_path.read_text(encoding="utf-8"))
+            psa["artifact_path"] = pending_subgraph_path.as_posix()
+            out["pending_subgraph_approval"] = psa
+        except (OSError, json.JSONDecodeError):
+            out["pending_subgraph_approval"] = None
+
+    subgraph_decision_path = run_dir / "subgraph_decision.json"
+    if subgraph_decision_path.exists():
+        try:
+            sd = json.loads(subgraph_decision_path.read_text(encoding="utf-8"))
+            sd["artifact_path"] = subgraph_decision_path.as_posix()
+            out["subgraph_decision"] = sd
+        except (OSError, json.JSONDecodeError):
+            out["subgraph_decision"] = None
+
+    subgraph_resume_path = run_dir / "subgraph_resume.json"
+    if subgraph_resume_path.exists():
+        try:
+            sr = json.loads(subgraph_resume_path.read_text(encoding="utf-8"))
+            sr["artifact_path"] = subgraph_resume_path.as_posix()
+            out["subgraph_resume"] = sr
+        except (OSError, json.JSONDecodeError):
+            out["subgraph_resume"] = None
+
+    out.update(_approval_lifecycle(run_dir))
     return out
+
+
+def _approval_lifecycle(run_dir: Path) -> dict[str, Any]:
+    # Runs with their own approval.json use the standard approval lifecycle.
+    approval_path = run_dir / "approval.json"
+    if approval_path.exists():
+        base: dict[str, Any] = {
+            "approval_status": "pending",
+            "display_status": "pending_approval",
+        }
+        decision_path = run_dir / "approval_decision.json"
+        if not decision_path.exists():
+            return base
+
+        try:
+            decision = json.loads(decision_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return base
+
+        decision_value = str(decision.get("decision") or "decided")
+        continuation_status = str(decision.get("continuation_status") or "")
+        base.update(
+            {
+                "approval_status": decision_value,
+                "display_status": f"{decision_value}_continued" if continuation_status else decision_value,
+                "continuation_run_id": decision.get("continuation_run_id"),
+                "continuation_status": continuation_status or None,
+            }
+        )
+        return base
+
+    # Parent runs whose child subgraph is paused on an approval node.
+    pending_subgraph_path = run_dir / "pending_subgraph_approval.json"
+    if pending_subgraph_path.exists():
+        subgraph_decision_path = run_dir / "subgraph_decision.json"
+        if not subgraph_decision_path.exists():
+            try:
+                psa = json.loads(pending_subgraph_path.read_text(encoding="utf-8"))
+                return {
+                    "display_status": "pending_child_approval",
+                    "pending_child_run_id": psa.get("child_run_id"),
+                }
+            except (OSError, json.JSONDecodeError):
+                return {"display_status": "pending_child_approval"}
+
+        try:
+            sd = json.loads(subgraph_decision_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"display_status": "pending_child_approval"}
+
+        parent_continuation_status = str(sd.get("parent_continuation_status") or "")
+        if parent_continuation_status == "ok":
+            return {
+                "display_status": "child_decided_continued",
+                "parent_continuation_run_id": sd.get("parent_continuation_run_id"),
+                "parent_continuation_status": parent_continuation_status,
+            }
+        if sd.get("decision") == "rejected":
+            return {"display_status": "child_rejected"}
+        return {"display_status": "child_failed"}
+
+    return {}

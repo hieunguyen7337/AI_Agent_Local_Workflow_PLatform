@@ -54,6 +54,8 @@ class GraphSpec(BaseModel):
     schema_version: Literal["workflow.graph/v1"] = "workflow.graph/v1"
     name: str
     description: str = ""
+    category: str = "general"
+    tags: list[str] = Field(default_factory=list)
     budget: BudgetSpec
     entry: str
     nodes: list[GraphNodeSpec]

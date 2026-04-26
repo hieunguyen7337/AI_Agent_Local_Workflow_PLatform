@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchApprovals } from "../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { decideApproval, fetchApprovals } from "../api/client";
 import type { ApprovalSummary } from "../types";
 
 type ApprovalTab = "pending" | "decided";
@@ -74,8 +74,39 @@ function ApprovalItem({
   selectedRun?: string;
   onSelectRun: (runId: string) => void;
 }) {
+  const queryClient = useQueryClient();
+  const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
   const selected = selectedRun === approval.run_id;
   const decision = approval.approval_decision;
+  const canDecide = approval.status === "pending" && !decision;
+  const mutation = useMutation({
+    mutationFn: (decisionValue: "approved" | "rejected") =>
+      decideApproval(approval.run_id, {
+        decision: decisionValue,
+        reviewer: "local-user",
+        comment: "Submitted from approval workbench.",
+      }),
+    onSuccess: async (result) => {
+      setConfirmed(false);
+      setError(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["approvals"] }),
+        queryClient.invalidateQueries({ queryKey: ["runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["run", approval.run_id] }),
+      ]);
+      onSelectRun(result.continuation_run_id);
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    },
+  });
+
+  function submitDecision(decisionValue: "approved" | "rejected") {
+    if (!confirmed || mutation.isPending) return;
+    mutation.mutate(decisionValue);
+  }
+
   return (
     <div className={["p-3 text-xs space-y-2", selected ? "bg-blue-50" : "bg-white"].join(" ")}>
       <div className="flex items-start justify-between gap-2">
@@ -101,6 +132,38 @@ function ApprovalItem({
       </div>
       <div className="text-slate-600">{preview(approval.prompt)}</div>
       <div className="text-slate-500">{fmtTime(approval.created_ns)}</div>
+      {canDecide && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-2 space-y-2">
+          <label className="flex items-start gap-2 text-amber-950">
+            <input
+              className="mt-0.5"
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            <span>I reviewed this approval request.</span>
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white disabled:bg-slate-300"
+              disabled={!confirmed || mutation.isPending}
+              onClick={() => submitDecision("approved")}
+            >
+              {mutation.isPending ? "Submitting..." : "Approve"}
+            </button>
+            <button
+              type="button"
+              className="rounded bg-red-700 px-3 py-1 text-xs font-medium text-white disabled:bg-slate-300"
+              disabled={!confirmed || mutation.isPending}
+              onClick={() => submitDecision("rejected")}
+            >
+              {mutation.isPending ? "Submitting..." : "Reject"}
+            </button>
+          </div>
+          {error && <div className="whitespace-pre-wrap text-red-700">{error}</div>}
+        </div>
+      )}
       {decision && (
         <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-emerald-900 space-y-1">
           <div>

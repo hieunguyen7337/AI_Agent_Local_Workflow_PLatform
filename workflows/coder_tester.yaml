@@ -1,6 +1,10 @@
 schema_version: workflow.graph/v1
 name: coder_tester
 description: Planner, coder, sandbox/LLM tester, and retry gate.
+category: coding
+tags:
+  - code-generation
+  - testing
 budget:
   cost_usd: 0.50
   latency_ms: 300000

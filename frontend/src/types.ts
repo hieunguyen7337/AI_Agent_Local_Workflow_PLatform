@@ -1,3 +1,11 @@
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+}
+
 export type NodeKind = "llm" | "tester" | "gate" | "retriever" | "router" | "approval" | "subgraph";
 
 export interface GraphNode {
@@ -38,6 +46,8 @@ export interface WorkflowSpecResponse {
     schema_version: string;
     name: string;
     description: string;
+    category: string;
+    tags: string[];
     budget: {
       cost_usd: number;
       latency_ms: number;
@@ -231,6 +241,10 @@ export interface RunSummary {
   checkpoints_db?: string;
   spans_jsonl?: string;
   manifest?: string;
+  approval_status?: "pending" | "approved" | "rejected";
+  display_status?: string;
+  continuation_run_id?: string;
+  continuation_status?: string | null;
 }
 
 export interface StartRunRequest {
@@ -292,6 +306,51 @@ export interface ApprovalDecisionResponse {
   continuation_status: string;
   continuation_run_dir: string;
   continuation_error?: string | null;
+  parent_run_id?: string | null;
+  parent_workflow?: string | null;
+  parent_subgraph_node_id?: string | null;
+  parent_continuation_run_id?: string | null;
+  parent_continuation_status?: string | null;
+  parent_continuation_run_dir?: string | null;
+  parent_continuation_error?: string | null;
+}
+
+export interface PendingSubgraphApproval {
+  parent_run_id: string;
+  parent_workflow?: string;
+  node_id: string;
+  child_workflow: string;
+  child_run_id: string;
+  child_run_dir?: string;
+  inputs?: Record<string, string>;
+  outputs?: Record<string, string>;
+  created_ns?: number;
+  artifact_path?: string;
+}
+
+export interface SubgraphDecision {
+  parent_run_id: string;
+  parent_workflow?: string;
+  subgraph_node_id: string;
+  child_run_id: string;
+  child_continuation_run_id: string;
+  decision: "approved" | "rejected";
+  parent_continuation_run_id?: string | null;
+  parent_continuation_status?: string | null;
+  parent_continuation_error?: string | null;
+  created_ns?: number;
+  artifact_path?: string;
+}
+
+export interface SubgraphResume {
+  source_parent_run_id: string;
+  parent_workflow?: string;
+  subgraph_node_id: string;
+  child_run_id: string;
+  child_continuation_run_id: string;
+  decision: "approved" | "rejected";
+  created_ns?: number;
+  artifact_path?: string;
 }
 
 export interface SubgraphLineage {
@@ -322,4 +381,10 @@ export interface RunDetailResponse extends RunSummary {
   } | null;
   subgraphs?: SubgraphLineage[];
   parent_run?: SubgraphLineage | null;
+  pending_subgraph_approval?: PendingSubgraphApproval | null;
+  subgraph_decision?: SubgraphDecision | null;
+  subgraph_resume?: SubgraphResume | null;
+  pending_child_run_id?: string | null;
+  parent_continuation_run_id?: string | null;
+  parent_continuation_status?: string | null;
 }

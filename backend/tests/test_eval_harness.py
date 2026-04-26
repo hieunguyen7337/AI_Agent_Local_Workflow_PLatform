@@ -344,3 +344,73 @@ def test_subgraph_eval_scores_mapped_output_and_records_lineage(monkeypatch, tmp
     assert result["subgraphs"][0]["child_workflow"] == "linear_rag"
     assert Path(result["subgraphs"][0]["artifact_path"]).exists()
     assert (resolve_run_dir(runs_root, result["subgraphs"][0]["child_run_id"]) / "parent_run.json").exists()
+
+
+def test_nested_approval_subgraph_eval_approved_and_rejected_paths(monkeypatch, tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    fx_path = tmp_path / "nested_approval_fixtures.yaml"
+    fx_path.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "id": "approved_subgraph",
+                    "input": "Draft a concise answer. Include the exact phrase 'human approved'.",
+                    "expected": "human approved",
+                    "approval_decision": "approved",
+                    "approval_comment": "Approved in eval fixture.",
+                },
+                {
+                    "id": "rejected_subgraph",
+                    "input": "Draft a concise answer that should be rejected before finalization.",
+                    "expected": "",
+                    "approval_decision": "rejected",
+                    "approval_comment": "Rejected in eval fixture.",
+                },
+            ]
+        )
+    )
+
+    def _openai_reply(**kwargs):
+        user = kwargs["messages"][-1]["content"]
+        # Draft node (approval_review child)
+        if "human approved" in user:
+            return LLMResponse(text="draft with human approved", usage=Usage(1, 1), model="gpt-4o-mini")
+        if "rejected before finalization" in user:
+            return LLMResponse(text="draft to reject", usage=Usage(1, 1), model="gpt-4o-mini")
+        # Finalizer node (runs only on approved path)
+        if "Approved draft:" in user:
+            return LLMResponse(text="final human approved answer", usage=Usage(1, 1), model="gpt-4o-mini")
+        raise AssertionError(f"unexpected OpenAI call with user message: {user[:120]!r}")
+
+    monkeypatch.setattr(oai, "stream_openai", _openai_reply)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    out = run_eval(
+        workflow="approval_subgraph_wrapper",
+        n_per_fixture=1,
+        fixtures_path=fx_path,
+        runs_root=runs_root,
+        output_path=tmp_path / "eval_nested_approval.json",
+    )
+
+    assert out["overall"]["total_runs"] == 2
+    assert out["overall"]["passes"] == 2
+    assert out["approval_path_coverage"] == {"approved": 1, "rejected": 1}
+
+    approved, rejected = out["results"]
+
+    # Approved path: child decided, parent continuation forked and ran to completion.
+    assert approved["approval_decision"] == "approved"
+    assert approved["child_run_id"] != approved["child_continuation_run_id"]
+    assert approved["parent_continuation_run_id"] is not None
+    assert approved["pass"] is True
+    assert Path(approved["decision_artifact"]).exists()
+    assert "subgraph_resume_artifact" in approved
+    assert Path(approved["subgraph_resume_artifact"]).exists()
+
+    # Rejected path: child decided (routes to __end__), parent continuation also forked
+    # (nested_final_answer will be empty), pass because expected is empty.
+    assert rejected["approval_decision"] == "rejected"
+    assert rejected["pass"] is True
+    assert rejected["child_continuation_run_id"] is not None

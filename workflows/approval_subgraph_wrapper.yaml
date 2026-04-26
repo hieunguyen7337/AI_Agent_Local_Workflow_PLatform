@@ -1,0 +1,23 @@
+schema_version: workflow.graph/v1
+name: approval_subgraph_wrapper
+description: Wrap approval_review as a subgraph to exercise nested approval pause/resume.
+category: subgraph
+tags:
+  - approval
+  - nested
+budget:
+  cost_usd: 0.5
+  latency_ms: 180000
+entry: review_child
+nodes:
+  - id: review_child
+    kind: subgraph
+    name: Approval review child
+    workflow: approval_review
+    inputs:
+      user_input: user_input
+    outputs:
+      final_answer: nested_final_answer
+edges:
+  - from: review_child
+    to: __end__

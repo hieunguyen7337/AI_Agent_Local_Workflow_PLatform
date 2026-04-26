@@ -526,6 +526,8 @@ def test_list_approvals_and_run_detail_include_pending_approval(
     assert run_resp.status_code == 200
     body = run_resp.json()
     assert body["status"] == "pending_approval"
+    assert body["approval_status"] == "pending"
+    assert body["display_status"] == "pending_approval"
     assert body["approval"]["node_id"] == "human_review"
     assert body["approval"]["artifact_path"].endswith("/approval.json")
 
@@ -584,6 +586,11 @@ def test_approval_decision_approved_forks_continuation(monkeypatch, tmp_path: Pa
     run_body = run_resp.json()
     assert run_body["approval_decision"]["decision"] == "approved"
     assert run_body["approval_decision"]["artifact_path"].endswith("/approval_decision.json")
+    assert run_body["status"] == "pending_approval"
+    assert run_body["approval_status"] == "approved"
+    assert run_body["display_status"] == "approved_continued"
+    assert run_body["continuation_run_id"] == body["continuation_run_id"]
+    assert run_body["continuation_status"] == "ok"
 
     continuation_resp = client.get(f"/api/runs/{body['continuation_run_id']}")
     assert continuation_resp.status_code == 200
@@ -1001,3 +1008,214 @@ def test_rollback_missing_workflow_or_snapshot_returns_404(monkeypatch, tmp_path
 
     missing_restore = client.post("/api/spec/coder_tester/rollback-snapshots/nope/restore", json={})
     assert missing_restore.status_code == 404
+
+
+# ── M5.8: nested approval subgraph tests ─────────────────────────────────────
+
+def _make_pending_subgraph_approval_run(monkeypatch, tmp_path: Path):
+    """Run approval_subgraph_wrapper until the child hits its approval node."""
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    replies = [
+        LLMResponse(text="Draft answer for review.", usage=Usage(1, 1), model="gpt-4o-mini"),
+    ]
+    monkeypatch.setattr("backend.providers.openai.stream_openai", lambda **kw: replies.pop(0))
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    metadata = graph_spec_to_metadata(load_graph_spec("approval_subgraph_wrapper"))
+    result = run_graph(
+        metadata,
+        user_input="Write something for review.",
+        runs_root=runs_root,
+    )
+    assert result.status == "pending_approval"
+    return runs_root, result
+
+
+def test_get_run_exposes_pending_subgraph_lineage(monkeypatch, tmp_path: Path):
+    runs_root, parent = _make_pending_subgraph_approval_run(monkeypatch, tmp_path)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/runs/{parent.run_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["display_status"] == "pending_child_approval"
+    assert "pending_subgraph_approval" in body
+    psa = body["pending_subgraph_approval"]
+    assert psa["parent_run_id"] == parent.run_id
+    assert psa["node_id"] == "review_child"
+    assert psa["child_workflow"] == "approval_review"
+    assert "approval" not in body or body.get("approval") is None
+    assert body["pending_child_run_id"] == psa["child_run_id"]
+
+
+def test_decide_child_approval_forks_parent_continuation(monkeypatch, tmp_path: Path):
+    runs_root, parent = _make_pending_subgraph_approval_run(monkeypatch, tmp_path)
+    pending_path = parent.run_dir / "pending_subgraph_approval.json"
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    child_run_id = pending["child_run_id"]
+
+    # Continuation of the child approval hits the finalizer (an LLM node).
+    monkeypatch.setattr(
+        "backend.providers.openai.stream_openai",
+        lambda **kw: LLMResponse(text="Final approved text.", usage=Usage(1, 1), model="gpt-4o-mini"),
+    )
+
+    client = TestClient(app)
+    resp = client.post(
+        f"/api/approvals/{child_run_id}/decision",
+        json={"decision": "approved", "reviewer": "tester", "comment": "LGTM"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["continuation_status"] == "ok"
+    assert "parent_continuation_run_id" in body
+    parent_cont_run_id = body["parent_continuation_run_id"]
+    assert parent_cont_run_id is not None
+
+    # Source parent run dir should have subgraph_decision.json.
+    parent_run_dir = resolve_run_dir(runs_root, parent.run_id)
+    sd_path = parent_run_dir / "subgraph_decision.json"
+    assert sd_path.exists()
+    sd = json.loads(sd_path.read_text(encoding="utf-8"))
+    assert sd["parent_continuation_run_id"] == parent_cont_run_id
+    assert sd["decision"] == "approved"
+
+    # Parent continuation run dir should have subgraph_resume.json.
+    parent_cont_dir = resolve_run_dir(runs_root, parent_cont_run_id)
+    sr_path = parent_cont_dir / "subgraph_resume.json"
+    assert sr_path.exists()
+    sr = json.loads(sr_path.read_text(encoding="utf-8"))
+    assert sr["source_parent_run_id"] == parent.run_id
+
+
+def test_get_run_after_child_decision_shows_child_decided_continued(monkeypatch, tmp_path: Path):
+    runs_root, parent = _make_pending_subgraph_approval_run(monkeypatch, tmp_path)
+    pending = json.loads((parent.run_dir / "pending_subgraph_approval.json").read_text(encoding="utf-8"))
+    child_run_id = pending["child_run_id"]
+
+    monkeypatch.setattr(
+        "backend.providers.openai.stream_openai",
+        lambda **kw: LLMResponse(text="Final approved text.", usage=Usage(1, 1), model="gpt-4o-mini"),
+    )
+
+    client = TestClient(app)
+    client.post(
+        f"/api/approvals/{child_run_id}/decision",
+        json={"decision": "approved"},
+    )
+
+    resp = client.get(f"/api/runs/{parent.run_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["display_status"] == "child_decided_continued"
+    assert "subgraph_decision" in body
+    assert body["parent_continuation_run_id"] is not None
+
+
+def test_duplicate_child_decision_still_rejected(monkeypatch, tmp_path: Path):
+    runs_root, parent = _make_pending_subgraph_approval_run(monkeypatch, tmp_path)
+    pending = json.loads((parent.run_dir / "pending_subgraph_approval.json").read_text(encoding="utf-8"))
+    child_run_id = pending["child_run_id"]
+
+    monkeypatch.setattr(
+        "backend.providers.openai.stream_openai",
+        lambda **kw: LLMResponse(text="Final approved text.", usage=Usage(1, 1), model="gpt-4o-mini"),
+    )
+
+    client = TestClient(app)
+    first = client.post(f"/api/approvals/{child_run_id}/decision", json={"decision": "approved"})
+    assert first.status_code == 200
+    second = client.post(f"/api/approvals/{child_run_id}/decision", json={"decision": "approved"})
+    assert second.status_code == 409
+
+
+# ── M5.10: list workflows endpoint ───────────────────────────────────────────
+
+_MINIMAL_LLM_NODE = (
+    "  - id: {node_id}\n"
+    "    kind: llm\n"
+    "    provider: openai\n"
+    "    model: gpt-4o-mini\n"
+    "    system_prompt: system\n"
+    "    user_prompt_template: '{{user_input}}'\n"
+    "    output_state_key: answer\n"
+)
+
+def _minimal_spec(name: str, description: str, node_id: str) -> str:
+    return (
+        "schema_version: workflow.graph/v1\n"
+        f"name: {name}\n"
+        f"description: {description}\n"
+        f"entry: {node_id}\n"
+        "nodes:\n"
+        + _MINIMAL_LLM_NODE.format(node_id=node_id)
+        + "edges: []\n"
+        "budget:\n"
+        "  cost_usd: 1.0\n"
+        "  latency_ms: 30000\n"
+    )
+
+
+def test_list_workflows_endpoint(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "alpha.yaml").write_text(_minimal_spec("Alpha Workflow", "First workflow", "node_a"), encoding="utf-8")
+    (specs_root / "beta.yaml").write_text(_minimal_spec("Beta Workflow", "Second workflow", "node_b"), encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 2
+    assert items[0]["id"] == "alpha"
+    assert items[0]["name"] == "Alpha Workflow"
+    assert items[0]["description"] == "First workflow"
+    assert items[0]["category"] == "general"
+    assert items[0]["tags"] == []
+    assert items[1]["id"] == "beta"
+    assert items[1]["name"] == "Beta Workflow"
+
+
+def test_list_workflows_broken_spec_still_listed(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "good.yaml").write_text(_minimal_spec("Good", "OK", "node_g"), encoding="utf-8")
+    (specs_root / "broken.yaml").write_text("not: [valid yaml for graphspec", encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 2
+    broken = next(i for i in items if i["id"] == "broken")
+    assert broken["name"] == "broken"
+    assert broken["description"] == ""
+    assert broken["category"] == "general"
+    assert broken["tags"] == []
+
+
+def test_list_workflows_endpoint_returns_library_metadata(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "searchable.yaml").write_text(
+        _minimal_spec("Searchable", "Has metadata", "node_s")
+        .replace("description: Has metadata\n", "description: Has metadata\ncategory: rag\ntags:\n  - retrieval\n  - example\n"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {
+            "id": "searchable",
+            "name": "Searchable",
+            "description": "Has metadata",
+            "category": "rag",
+            "tags": ["retrieval", "example"],
+        }
+    ]

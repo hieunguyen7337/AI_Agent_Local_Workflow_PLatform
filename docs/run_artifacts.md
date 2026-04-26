@@ -29,6 +29,9 @@ run_20260425T091230Z_coder_tester_a1b2c3d4
 - `approval_resume.json` - continuation lineage after an approval decision.
 - `parent_run.json` - child subgraph run pointer back to its parent run.
 - `subgraphs/*.json` - parent run pointers to child subgraph runs.
+- `pending_subgraph_approval.json` - written in the parent run dir when a child subgraph pauses on an approval node; links to the child pending run and carries the parent state snapshot needed for continuation.
+- `subgraph_decision.json` - written in the source parent run dir after the child approval is decided; links to the child continuation run and the forked parent continuation run.
+- `subgraph_resume.json` - written in the parent continuation run dir after the parent resumes; links back to the source parent run and child decision.
 
 Do not edit `.db` files by hand unless intentionally repairing local artifacts.
 

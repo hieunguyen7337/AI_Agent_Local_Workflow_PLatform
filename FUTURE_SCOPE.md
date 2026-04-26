@@ -1,6 +1,6 @@
 # Future Scope
 
-This file tracks deliberately deferred work beyond M5.6. It should stay aligned with the product vision:
+This file tracks deliberately deferred work beyond M5.7. It should stay aligned with the product vision:
 
 - YAML `GraphSpec` files are the simple source of truth for workflows.
 - LLMs should be able to read, analyze, propose mutations, and iterate on that source of truth.
@@ -20,19 +20,27 @@ Entries should be pruned or moved when they graduate into implemented milestones
 - **Approval decisions** - pending approvals can be approved or rejected, producing an immutable source decision artifact and a forked continuation run with lineage.
 - **Approval workbench** - approvals are visible as a first-class frontend list with pending/decided filtering and source/continuation navigation.
 - **Approval eval coverage** - approval workflows can be evaluated with fixture-provided decisions, continuation lineage checks, and approval path coverage metrics.
-- **Reusable collapsed subgraphs** - YAML workflows can reference acyclic, non-approval child workflows as collapsed nodes, execute them as nested local runs, and persist parent/child lineage artifacts.
+- **Reusable collapsed subgraphs** - YAML workflows can reference acyclic child workflows as collapsed nodes, execute them as nested local runs, and persist parent/child lineage artifacts.
 - **Richer subgraph review** - reviewers can open a subgraph node's child graph/source context, navigate parent/child run lineage, and evaluate mapped subgraph outputs.
 - **Multi-proposal optimization loop** - the app can generate multiple YAML mutation candidates, evaluate them under a shared cost cap, rank them, and recommend one for human review.
 - **Rollback restore flow** - rollback snapshots can be listed, previewed, and restored after human confirmation, with a new audit record for restore actions.
 - **YAML-only workflow loading** - CLI, replay, evals, API, graph export, and tests load canonical YAML specs without Python workflow module fallback. The Python builder remains only as an internal metadata/compiler helper.
+- **Nested approval subgraphs** - child subgraph pauses on an approval node surface as parent `pending_approval`; child decisions auto-fork a parent continuation run; lineage links parent source ↔ child source ↔ child continuation ↔ parent continuation via `pending_subgraph_approval.json`, `subgraph_decision.json`, and `subgraph_resume.json`.
+- **Approval subgraph eval coverage** - `approval_subgraph_wrapper` has fixture-driven eval support; the harness detects nested approval runs, routes `decide_approval` to the child run id, and scores against the parent continuation's final state.
 - **Structured run artifacts** - execution runs are stored by workflow/date with readable run ids, manifests, artifact paths in the API/UI, and documentation for inspecting JSONL and SQLite files.
+- **UI workbench cleanup** - the frontend keeps the graph canvas primary and organizes the review surface into Inspect, Run, Improve, and Recover modes so the source-of-truth loop is easier to follow.
+- **Dynamic workflow list** - `GET /api/workflows` scans `workflows/*.yaml` and returns `[{id, name, description}]`; the frontend selector is fully API-driven so any `.yaml` file dropped into `workflows/` is immediately discoverable without touching frontend code.
 
-## Next product milestone - nested approval subgraphs
+## Product usability
 
-- **Parent/child pause semantics** - define how a parent run reports status when a child subgraph pauses on an approval node.
-- **Decision routing** - decide whether approval decisions are issued against the child run only, the parent run, or a coordinated parent/child decision endpoint.
-- **Continuation lineage** - preserve immutable source runs while linking parent run, child pending run, decision artifact, and continuation run clearly.
-- **UI review flow** - let reviewers navigate from parent subgraph node to the child approval prompt, decision state, and continuation evidence without changing the YAML source-of-truth model.
+- **UI audit checklist** - maintain a manual checklist for validating graph/source/run/proposal/eval/apply/rollback/approval/subgraph/artifact flows before adding major backend capabilities.
+- **State clarity** - keep raw runtime status separate from derived lifecycle status, especially for approval continuations, failed runs, and rollback/apply audit actions.
+- **Workbench density** - prefer task-focused panels over stacking unrelated controls in one sidebar. The graph should remain the primary canvas while the workbench changes mode by user intent.
+- **Artifact readability** - keep local artifact paths visible but compact, with documentation pointing users to the right JSONL or SQLite inspection method.
+
+## Next product milestone
+
+- **Workflow library conventions** - add conventions for organizing many YAML workflow specs, examples, and reusable pipeline templates so they remain discoverable and the source-of-truth model stays intact.
 
 ## Workflow capabilities
 

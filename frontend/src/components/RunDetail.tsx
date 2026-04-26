@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { decideApproval, fetchRun } from "../api/client";
-import type { ApprovalDecisionResponse, SubgraphLineage } from "../types";
+import type { ApprovalDecisionResponse, SubgraphLineage, PendingSubgraphApproval, SubgraphDecision, SubgraphResume } from "../types";
 
 export default function RunDetail({
   runId,
@@ -27,6 +27,8 @@ export default function RunDetail({
   const canDecide = run.status === "pending_approval" && run.approval && !run.approval_decision;
   const approvalDecision = run.approval_decision;
   const approvalResume = run.approval_resume;
+  const displayStatus = run.display_status ?? run.status;
+  const approvalPanelTitle = approvalDecision ? "Approval checkpoint" : "Pending approval";
 
   async function submitDecision(decision: "approved" | "rejected") {
     if (!confirmed || isSubmittingDecision) return;
@@ -54,21 +56,41 @@ export default function RunDetail({
   }
 
   return (
-    <div className="p-4 text-sm space-y-3 overflow-y-auto">
+    <div className="h-full overflow-y-auto p-4 text-sm space-y-3">
       <div>
         <div className="text-xs uppercase text-gray-500">Run</div>
         <div className="font-mono text-xs">{run.run_id}</div>
       </div>
       <div className="grid grid-cols-3 gap-3">
-        <div><div className="text-xs text-gray-500">Status</div><div>{run.status}</div></div>
+        <div>
+          <div className="text-xs text-gray-500">Status</div>
+          <div>{displayStatus}</div>
+          {displayStatus !== run.status && <div className="text-[11px] text-gray-500">raw: {run.status}</div>}
+        </div>
         <div><div className="text-xs text-gray-500">Cost</div><div>${run.cost_usd?.toFixed(4) ?? "-"}</div></div>
         <div><div className="text-xs text-gray-500">Latency</div><div>{run.latency_ms?.toFixed(0) ?? "-"} ms</div></div>
       </div>
+      {approvalDecision && run.continuation_run_id && (
+        <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+          Approval {approvalDecision.decision}; continued as{" "}
+          <button
+            type="button"
+            className="font-mono hover:underline"
+            onClick={() => onSelectRun?.(run.continuation_run_id!)}
+          >
+            {run.continuation_run_id}
+          </button>
+          .
+        </div>
+      )}
       {run.error && (
         <div className="p-2 rounded bg-red-50 text-red-800 text-xs whitespace-pre-wrap">{run.error}</div>
       )}
       <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 space-y-1">
-        <div className="font-medium">Artifacts</div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="font-medium">Artifacts</div>
+          <div className="text-[11px] text-slate-500">Guide: docs/run_artifacts.md</div>
+        </div>
         <ArtifactPath label="Run dir" value={run.run_dir} />
         <ArtifactPath label="Manifest" value={run.manifest} />
         <ArtifactPath label="Telemetry DB" value={run.telemetry_db} />
@@ -77,7 +99,7 @@ export default function RunDetail({
       </div>
       {run.approval && (
         <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
-          <div className="font-medium">Pending approval</div>
+          <div className="font-medium">{approvalPanelTitle}</div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <div className="uppercase text-amber-700">Node</div>
@@ -238,6 +260,24 @@ export default function RunDetail({
           <div className="font-mono text-[11px]">{run.parent_run.artifact_path}</div>
         </div>
       )}
+      {run.pending_subgraph_approval && !run.subgraph_decision && (
+        <PendingChildApprovalPanel
+          psa={run.pending_subgraph_approval as PendingSubgraphApproval}
+          onSelectRun={onSelectRun}
+        />
+      )}
+      {run.subgraph_decision && (
+        <SubgraphDecisionPanel
+          sd={run.subgraph_decision as SubgraphDecision}
+          onSelectRun={onSelectRun}
+        />
+      )}
+      {run.subgraph_resume && (
+        <SubgraphResumePanel
+          sr={run.subgraph_resume as SubgraphResume}
+          onSelectRun={onSelectRun}
+        />
+      )}
       <div>
         <div className="text-xs uppercase text-gray-500 mb-1">Spans</div>
         <div className="space-y-1">
@@ -255,6 +295,118 @@ export default function RunDetail({
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PendingChildApprovalPanel({
+  psa,
+  onSelectRun,
+}: {
+  psa: PendingSubgraphApproval;
+  onSelectRun?: (runId: string) => void;
+}) {
+  return (
+    <div className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 space-y-2">
+      <div className="font-medium">Pending child approval</div>
+      <div>
+        Subgraph node <span className="font-mono">{psa.node_id}</span> launched{" "}
+        <span className="font-mono">{psa.child_workflow}</span> which is awaiting approval.
+      </div>
+      <div>
+        Child run:{" "}
+        <button
+          type="button"
+          className="font-mono hover:underline"
+          onClick={() => onSelectRun?.(psa.child_run_id)}
+        >
+          {psa.child_run_id}
+        </button>
+      </div>
+      <div className="font-mono text-[11px]">{psa.artifact_path}</div>
+    </div>
+  );
+}
+
+function SubgraphDecisionPanel({
+  sd,
+  onSelectRun,
+}: {
+  sd: SubgraphDecision;
+  onSelectRun?: (runId: string) => void;
+}) {
+  return (
+    <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-2">
+      <div className="font-medium">Subgraph approval decided</div>
+      <div>
+        Node <span className="font-mono">{sd.subgraph_node_id}</span> — decision:{" "}
+        <span className="font-semibold">{sd.decision}</span>
+      </div>
+      <div>
+        Child continuation:{" "}
+        <button
+          type="button"
+          className="font-mono hover:underline"
+          onClick={() => onSelectRun?.(sd.child_continuation_run_id)}
+        >
+          {sd.child_continuation_run_id}
+        </button>
+      </div>
+      {sd.parent_continuation_run_id && (
+        <div>
+          Parent continuation:{" "}
+          <button
+            type="button"
+            className="font-mono hover:underline"
+            onClick={() => onSelectRun?.(sd.parent_continuation_run_id!)}
+          >
+            {sd.parent_continuation_run_id}
+          </button>
+          {sd.parent_continuation_status && (
+            <span className="ml-1 text-emerald-700">({sd.parent_continuation_status})</span>
+          )}
+        </div>
+      )}
+      <div className="font-mono text-[11px]">{sd.artifact_path}</div>
+    </div>
+  );
+}
+
+function SubgraphResumePanel({
+  sr,
+  onSelectRun,
+}: {
+  sr: SubgraphResume;
+  onSelectRun?: (runId: string) => void;
+}) {
+  return (
+    <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 space-y-2">
+      <div className="font-medium">Subgraph continuation</div>
+      <div>
+        Source parent run:{" "}
+        <button
+          type="button"
+          className="font-mono hover:underline"
+          onClick={() => onSelectRun?.(sr.source_parent_run_id)}
+        >
+          {sr.source_parent_run_id}
+        </button>
+      </div>
+      <div>
+        Node <span className="font-mono">{sr.subgraph_node_id}</span> — child decision:{" "}
+        <span className="font-semibold">{sr.decision}</span>
+      </div>
+      <div>
+        Child continuation:{" "}
+        <button
+          type="button"
+          className="font-mono hover:underline"
+          onClick={() => onSelectRun?.(sr.child_continuation_run_id)}
+        >
+          {sr.child_continuation_run_id}
+        </button>
+      </div>
+      <div className="font-mono text-[11px]">{sr.artifact_path}</div>
     </div>
   );
 }

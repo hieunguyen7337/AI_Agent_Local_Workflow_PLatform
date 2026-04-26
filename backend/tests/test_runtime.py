@@ -304,3 +304,80 @@ def test_subgraph_node_executes_child_run_and_writes_lineage(monkeypatch, tmp_ru
     assert lineage["status"] == "ok"
     assert lineage["outputs"] == {"final_answer": "rag_answer"}
     assert (resolve_run_dir(tmp_runs_root, lineage["child_run_id"]) / "parent_run.json").exists()
+
+
+def test_nested_subgraph_pauses_parent_with_lineage(monkeypatch, tmp_runs_root):
+    # approval_review's draft node calls an LLM; after that it hits the approval node.
+    replies = [
+        LLMResponse(text="Draft answer for review.", usage=Usage(5, 5), model="gpt-4o-mini"),
+    ]
+    monkeypatch.setattr(oai, "stream_openai", _Replies(replies))
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    metadata = graph_spec_to_metadata(load_graph_spec("approval_subgraph_wrapper"))
+    result = run_graph(metadata, user_input="Write something for review.", runs_root=tmp_runs_root)
+
+    assert result.status == "pending_approval"
+    assert result.error is None
+
+    # Parent has pending_subgraph_approval.json but no approval.json of its own.
+    assert not (result.run_dir / "approval.json").exists()
+    pending_path = result.run_dir / "pending_subgraph_approval.json"
+    assert pending_path.exists()
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert pending["parent_run_id"] == result.run_id
+    assert pending["node_id"] == "review_child"
+    assert pending["child_workflow"] == "approval_review"
+
+    # Child pending run has both approval.json and parent_run.json.
+    child_run_id = pending["child_run_id"]
+    child_run_dir = resolve_run_dir(tmp_runs_root, child_run_id)
+    assert (child_run_dir / "approval.json").exists()
+    parent_link = json.loads((child_run_dir / "parent_run.json").read_text(encoding="utf-8"))
+    assert parent_link["parent_run_id"] == result.run_id
+    assert parent_link["node_id"] == "review_child"
+
+
+def test_subgraph_resume_marker_passthrough(monkeypatch, tmp_runs_root):
+    from backend.runtime.nodes.subgraph import make_subgraph_node
+    from backend.builder.nodes import SubgraphNodeConfig
+
+    cfg = SubgraphNodeConfig(
+        id="test_child",
+        workflow="approval_review",
+        inputs={"user_input": "user_input"},
+        outputs={"final_answer": "result_key"},
+    )
+
+    sentinel = object()
+    call_count = {"n": 0}
+
+    def _fail_cost(cost: float) -> None:
+        call_count["n"] += 1
+
+    node_fn = make_subgraph_node(
+        cfg,
+        run_id="parent_run_test",
+        graph_name="test_workflow",
+        run_dir=tmp_runs_root,
+        runs_root=tmp_runs_root,
+        on_cost=_fail_cost,
+    )
+
+    # State contains the resume marker — child execution should be skipped.
+    state = {
+        "user_input": "ignored",
+        "_subgraph_resume": {
+            "test_child": {
+                "child_run_id": "child_continuation_xyz",
+                "outputs": {"result_key": "mapped_output_value"},
+            }
+        },
+    }
+    output = node_fn(state)  # type: ignore[arg-type]
+
+    # No child execution, so on_cost should not have been called.
+    assert call_count["n"] == 0
+    assert output["result_key"] == "mapped_output_value"
+    # Marker for this node should be cleared.
+    assert "test_child" not in output.get("_subgraph_resume", {})

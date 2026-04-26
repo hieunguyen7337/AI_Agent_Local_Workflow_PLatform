@@ -30,6 +30,9 @@ class WorkflowState(TypedDict, total=False):
     tester_mode: str
     approval_decision: str
     pending_approval: dict[str, Any]
+    nested_final_answer: str
+    pending_subgraph_approval: dict[str, Any]
+    _subgraph_resume: dict[str, Any]
 
     iteration_counts: dict[str, int]
     cost_usd_accum: float
@@ -61,6 +64,9 @@ def new_state(user_input: str) -> WorkflowState:
         tester_mode="",
         approval_decision="",
         pending_approval={},
+        nested_final_answer="",
+        pending_subgraph_approval={},
+        _subgraph_resume={},
         iteration_counts={},
         cost_usd_accum=0.0,
         latency_ms_accum=0.0,

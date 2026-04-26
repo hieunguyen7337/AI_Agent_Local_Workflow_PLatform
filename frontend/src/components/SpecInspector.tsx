@@ -162,6 +162,8 @@ export default function SpecInspector({
   tab,
   onTabChange,
   onApplied,
+  availableTabs,
+  title = "Source inspector",
 }: {
   topology?: Topology;
   spec?: WorkflowSpecResponse;
@@ -169,6 +171,8 @@ export default function SpecInspector({
   tab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
   onApplied?: () => void | Promise<void>;
+  availableTabs?: InspectorTab[];
+  title?: string;
 }) {
   const selectedNode =
     topology?.nodes.find((node) => node.id === selectedNodeId) ??
@@ -398,28 +402,31 @@ export default function SpecInspector({
   const selectedCandidate = optimization?.candidates.find(
     (candidate) => candidate.candidate_id === selectedCandidateId
   );
+  const tabs = availableTabs ?? (["node", "source", "validation", "propose", "rollback"] as InspectorTab[]);
 
   return (
     <div className="h-full flex flex-col bg-white">
       <div className="border-b px-3 py-2">
-        <div className="text-xs uppercase text-slate-500">Source inspector</div>
+        <div className="text-xs uppercase text-slate-500">{title}</div>
         <div className="text-sm font-semibold text-slate-800">{spec?.workflow ?? topology?.name ?? "-"}</div>
       </div>
-      <div className="border-b flex text-xs">
-        {(["node", "source", "validation", "propose", "rollback"] as InspectorTab[]).map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={[
-              "px-3 py-2 border-r capitalize",
-              tab === item ? "bg-slate-100 text-slate-900 font-medium" : "bg-white text-slate-500",
-            ].join(" ")}
-            onClick={() => onTabChange(item)}
-          >
-            {item}
-          </button>
-        ))}
-      </div>
+      {tabs.length > 1 && (
+        <div className="border-b flex text-xs">
+          {tabs.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={[
+                "px-3 py-2 border-r capitalize",
+                tab === item ? "bg-slate-100 text-slate-900 font-medium" : "bg-white text-slate-500",
+              ].join(" ")}
+              onClick={() => onTabChange(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-3">
         {tab === "node" && (
           <div className="space-y-3">

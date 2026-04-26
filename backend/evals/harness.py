@@ -206,6 +206,7 @@ def _infer_pass(final_state: dict, expected: str, *, has_tester_node: bool) -> b
 
     candidate_keys = (
         "final_answer",
+        "nested_final_answer",
         "rag_answer",
         "synthesiser_output",
         "answer",
@@ -248,6 +249,19 @@ def _build_eval_result(
         if subgraphs:
             eval_result["subgraphs"] = subgraphs
         return eval_result
+
+    # Detect nested approval subgraph: parent paused but has no own approval.json.
+    pending_subgraph_path = result.run_dir / "pending_subgraph_approval.json"
+    if pending_subgraph_path.exists():
+        return _build_nested_subgraph_eval_result(
+            workflow=workflow,
+            fixture=fixture,
+            iteration=iteration,
+            result=result,
+            pending_subgraph_path=pending_subgraph_path,
+            runs_root=runs_root,
+            has_tester_node=has_tester_node,
+        )
 
     if fixture.approval_decision is None:
         return {
@@ -294,6 +308,103 @@ def _build_eval_result(
         "status": decision.continuation_status,
         "error": decision.continuation_error,
     }
+
+
+def _build_nested_subgraph_eval_result(
+    *,
+    workflow: str,
+    fixture: Fixture,
+    iteration: int,
+    result,
+    pending_subgraph_path: Path,
+    runs_root: Path,
+    has_tester_node: bool,
+) -> dict:
+    if fixture.approval_decision is None:
+        return {
+            "fixture_id": fixture.id,
+            "iteration": iteration,
+            "run_id": result.run_id,
+            "source_run_id": result.run_id,
+            "pass": False,
+            "cost_usd": result.cost_usd,
+            "latency_ms": result.latency_ms,
+            "status": "pending_approval",
+            "error": "fixture approval_decision is required for nested subgraph approval runs",
+        }
+
+    try:
+        psa = json.loads(pending_subgraph_path.read_text(encoding="utf-8"))
+        child_run_id = str(psa["child_run_id"])
+    except (OSError, json.JSONDecodeError, KeyError) as exc:
+        return {
+            "fixture_id": fixture.id,
+            "iteration": iteration,
+            "run_id": result.run_id,
+            "source_run_id": result.run_id,
+            "pass": False,
+            "cost_usd": result.cost_usd,
+            "latency_ms": result.latency_ms,
+            "status": "error",
+            "error": f"could not read pending_subgraph_approval.json: {exc}",
+        }
+
+    # Decide the child approval; decide_approval auto-forks the parent continuation.
+    decision = decide_approval(
+        run_id=child_run_id,
+        decision=fixture.approval_decision,
+        reviewer="eval",
+        comment=fixture.approval_comment,
+        runs_root=runs_root,
+        metadata=None,  # auto-loads child workflow metadata from approval artifact
+    )
+
+    # Score against the parent continuation's final state when available.
+    if decision.parent_continuation_final_state is not None:
+        passed = _infer_approval_pass(
+            final_state=decision.parent_continuation_final_state,
+            expected=fixture.expected,
+            decision=fixture.approval_decision,
+            continuation_status=decision.parent_continuation_status or "",
+            has_tester_node=has_tester_node,
+        )
+        final_status = decision.parent_continuation_status or decision.continuation_status
+        final_error = decision.parent_continuation_error or decision.continuation_error
+    else:
+        # No parent continuation forked (e.g. child continuation itself failed).
+        passed = _infer_approval_pass(
+            final_state=decision.continuation_final_state,
+            expected=fixture.expected,
+            decision=fixture.approval_decision,
+            continuation_status=decision.continuation_status,
+            has_tester_node=has_tester_node,
+        )
+        final_status = decision.continuation_status
+        final_error = decision.continuation_error
+
+    eval_result: dict = {
+        "fixture_id": fixture.id,
+        "iteration": iteration,
+        "run_id": decision.parent_continuation_run_id or decision.continuation_run_id,
+        "source_run_id": result.run_id,
+        "child_run_id": child_run_id,
+        "child_continuation_run_id": decision.continuation_run_id,
+        "parent_continuation_run_id": decision.parent_continuation_run_id,
+        "approval_decision": fixture.approval_decision,
+        "decision_artifact": decision.decision_artifact.as_posix(),
+        "pass": passed,
+        "cost_usd": decision.continuation_cost_usd,
+        "latency_ms": decision.continuation_latency_ms,
+        "status": final_status,
+        "error": final_error,
+    }
+
+    if decision.parent_continuation_run_dir is not None:
+        sr_path = decision.parent_continuation_run_dir / "subgraph_resume.json"
+        if sr_path.exists():
+            eval_result["subgraph_resume_artifact"] = sr_path.as_posix()
+
+    return eval_result
 
 
 def _read_subgraph_lineage(run_dir: Path) -> list[dict]:

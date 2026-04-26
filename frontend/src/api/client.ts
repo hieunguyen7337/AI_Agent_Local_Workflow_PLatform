@@ -21,9 +21,16 @@ import type {
   RunSummary,
   Topology,
   WorkflowSpecResponse,
+  WorkflowSummary,
 } from "../types";
 
 const BASE = "";
+
+export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
+  const r = await fetch(`${BASE}/api/workflows`);
+  if (!r.ok) throw new Error(`workflows fetch ${r.status}`);
+  return r.json();
+}
 
 export async function fetchTopology(workflow: string): Promise<Topology> {
   const r = await fetch(`${BASE}/api/graph/${workflow}`);

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import GraphView from "./components/GraphView";
 import RunList from "./components/RunList";
@@ -6,30 +6,64 @@ import RunDetail from "./components/RunDetail";
 import ApprovalWorkbench from "./components/ApprovalWorkbench";
 import SpecInspector from "./components/SpecInspector";
 import RunStarter from "./components/RunStarter";
-import { fetchNodeMetrics, fetchTopology, fetchWorkflowSpec } from "./api/client";
+import { fetchNodeMetrics, fetchTopology, fetchWorkflowSpec, fetchWorkflows } from "./api/client";
 import { useLiveUpdates } from "./live/useLiveUpdates";
+import type { WorkflowSummary } from "./types";
 
-const WORKFLOWS = [
-  "coder_tester",
-  "linear_rag",
-  "supervisor_loop",
-  "dispatch_aggregate",
-  "approval_review",
-  "rag_subgraph_wrapper",
-] as const;
 type InspectorTab = "node" | "source" | "validation" | "propose" | "rollback";
+type WorkbenchTab = "inspect" | "run" | "improve" | "recover";
+
+const WORKBENCH_TABS: Array<{ id: WorkbenchTab; label: string }> = [
+  { id: "inspect", label: "Inspect" },
+  { id: "run", label: "Run" },
+  { id: "improve", label: "Improve" },
+  { id: "recover", label: "Recover" },
+];
+
+function categoryLabel(category: string) {
+  return category
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function workflowMatchesSearch(workflow: WorkflowSummary, search: string) {
+  const query = search.trim().toLowerCase();
+  if (query === "") return true;
+  return [workflow.id, workflow.name, workflow.description, workflow.category, ...workflow.tags]
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
+}
 
 export default function App() {
-  const [workflow, setWorkflow] = useState<(typeof WORKFLOWS)[number]>("coder_tester");
+  const [workflow, setWorkflow] = useState<string>("");
+  const [workflowSearch, setWorkflowSearch] = useState("");
   const [selectedRun, setSelectedRun] = useState<string | undefined>(undefined);
   const [selectedNode, setSelectedNode] = useState<string | undefined>(undefined);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("node");
+  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("inspect");
   useLiveUpdates(workflow, selectedRun);
+
+  const workflows = useQuery({
+    queryKey: ["workflows"],
+    queryFn: fetchWorkflows,
+    staleTime: Infinity,
+    refetchInterval: false,
+  });
+
+  useEffect(() => {
+    if (workflow === "" && workflows.data && workflows.data.length > 0) {
+      setWorkflow(workflows.data[0].id);
+    }
+  }, [workflow, workflows.data]);
 
   useEffect(() => {
     setSelectedRun(undefined);
     setSelectedNode(undefined);
     setInspectorTab("node");
+    setWorkbenchTab("inspect");
   }, [workflow]);
 
   const topo = useQuery({
@@ -53,24 +87,66 @@ export default function App() {
     refetchInterval: false,
   });
 
+  const groupedWorkflows = useMemo(() => {
+    const groups = new Map<string, WorkflowSummary[]>();
+    for (const item of workflows.data ?? []) {
+      if (!workflowMatchesSearch(item, workflowSearch)) continue;
+      const category = item.category || "general";
+      groups.set(category, [...(groups.get(category) ?? []), item]);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, items]) => ({
+        category,
+        items: items.sort((a, b) => a.name.localeCompare(b.name)),
+      }));
+  }, [workflowSearch, workflows.data]);
+
+  const selectedWorkflowSummary = workflows.data?.find((item) => item.id === workflow);
+  const visibleGroupedWorkflows = useMemo(() => {
+    if (!selectedWorkflowSummary || workflowMatchesSearch(selectedWorkflowSummary, workflowSearch)) {
+      return groupedWorkflows;
+    }
+    return [{ category: "current-selection", items: [selectedWorkflowSummary] }, ...groupedWorkflows];
+  }, [groupedWorkflows, selectedWorkflowSummary, workflowSearch]);
+
+  const filteredWorkflowCount = groupedWorkflows.reduce((count, group) => count + group.items.length, 0);
+
   return (
-    <div className="h-full grid" style={{ gridTemplateRows: "48px 1fr", gridTemplateColumns: "1fr 460px" }}>
+    <div
+      className="h-full grid"
+      style={{ gridTemplateRows: "48px 1fr", gridTemplateColumns: "minmax(0, 1fr) minmax(480px, 520px)" }}
+    >
       <header className="col-span-2 border-b flex items-center px-4 bg-white gap-3">
         <div className="font-semibold">Workflow Platform</div>
         <label className="text-sm text-gray-500">Workflow</label>
+        <input
+          type="search"
+          className="w-48 text-sm border border-gray-300 rounded px-2 py-1 bg-white"
+          placeholder="Search workflows"
+          value={workflowSearch}
+          onChange={(e) => setWorkflowSearch(e.target.value)}
+        />
         <select
-          className="text-sm border border-gray-300 rounded px-2 py-1 bg-white"
+          className="min-w-64 text-sm border border-gray-300 rounded px-2 py-1 bg-white"
           value={workflow}
-          onChange={(e) => setWorkflow(e.target.value as (typeof WORKFLOWS)[number])}
+          disabled={workflows.isLoading || !workflows.data}
+          onChange={(e) => setWorkflow(e.target.value)}
         >
-          {WORKFLOWS.map((w) => (
-            <option key={w} value={w}>
-              {w}
-            </option>
+          {workflows.isLoading && <option value="">Loading...</option>}
+          {!workflows.isLoading && filteredWorkflowCount === 0 && !selectedWorkflowSummary && <option value="">No workflows match</option>}
+          {visibleGroupedWorkflows.map((group) => (
+            <optgroup key={group.category} label={categoryLabel(group.category)}>
+              {group.items.map((w) => (
+                <option key={w.id} value={w.id} title={[w.description, w.tags.join(", ")].filter(Boolean).join(" | ")}>
+                  {w.name}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </header>
-      <div className="border-r">
+      <div className="border-r min-w-0">
         {topo.isLoading && <div className="p-4 text-sm text-gray-500">Loading topology...</div>}
         {topo.error && <div className="p-4 text-sm text-red-700">Error loading topology. Is the backend running on :8000?</div>}
         {topo.data && (
@@ -81,38 +157,111 @@ export default function App() {
             onSelectNode={(nodeId) => {
               setSelectedNode(nodeId);
               setInspectorTab("node");
+              setWorkbenchTab("inspect");
             }}
           />
         )}
       </div>
-      <aside className="flex flex-col h-full overflow-hidden">
-        <div className="border-b h-[55%] min-h-[320px] overflow-hidden">
-          {spec.error && <div className="p-4 text-sm text-red-700">Error loading source spec.</div>}
-          <SpecInspector
-            topology={topo.data}
-            spec={spec.data}
-            selectedNodeId={selectedNode}
-            tab={inspectorTab}
-            onTabChange={setInspectorTab}
-            onApplied={async () => {
-              await Promise.all([spec.refetch(), topo.refetch()]);
-            }}
-          />
+      <aside className="flex flex-col h-full min-w-0 overflow-hidden">
+        <div className="border-b bg-white">
+          <div className="px-3 py-2">
+            <div className="text-xs uppercase text-slate-500">Workflow workbench</div>
+            <div className="text-sm font-semibold text-slate-800">{workflow}</div>
+          </div>
+          <div className="flex border-t text-xs">
+            {WORKBENCH_TABS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={[
+                  "flex-1 border-r px-3 py-2 text-center",
+                  workbenchTab === item.id ? "bg-slate-100 font-medium text-slate-900" : "bg-white text-slate-500",
+                ].join(" ")}
+                onClick={() => {
+                  setWorkbenchTab(item.id);
+                  if (item.id === "inspect" && !["node", "source", "validation"].includes(inspectorTab)) {
+                    setInspectorTab("node");
+                  }
+                  if (item.id === "improve") setInspectorTab("propose");
+                  if (item.id === "recover") setInspectorTab("rollback");
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="border-b flex-none">
-          <RunStarter workflow={workflow} onStarted={setSelectedRun} />
-          <div className="px-3 py-2 text-xs uppercase text-gray-500">Recent runs</div>
-          <RunList workflow={workflow} onSelect={(r) => setSelectedRun(r.run_id)} selected={selectedRun} />
-        </div>
-        <div className="border-b h-[220px] flex-none overflow-hidden">
-          <div className="px-3 py-2 text-xs uppercase text-gray-500">Approvals</div>
-          <ApprovalWorkbench onSelectRun={setSelectedRun} selectedRun={selectedRun} />
-        </div>
-        <div className="flex-1 overflow-hidden">
-          {selectedRun ? (
-            <RunDetail runId={selectedRun} onSelectRun={setSelectedRun} />
-          ) : (
-            <div className="p-4 text-sm text-gray-500">Select a run to see details.</div>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {workbenchTab === "inspect" && (
+            <div className="h-full overflow-hidden">
+              {spec.error && <div className="p-4 text-sm text-red-700">Error loading source spec.</div>}
+              <SpecInspector
+                topology={topo.data}
+                spec={spec.data}
+                selectedNodeId={selectedNode}
+                tab={["node", "source", "validation"].includes(inspectorTab) ? inspectorTab : "node"}
+                onTabChange={setInspectorTab}
+                availableTabs={["node", "source", "validation"]}
+                title="Inspect source"
+              />
+            </div>
+          )}
+          {workbenchTab === "run" && (
+            <div className="h-full min-h-0 flex flex-col overflow-hidden bg-white">
+              <RunStarter
+                workflow={workflow}
+                onStarted={(runId) => {
+                  setSelectedRun(runId);
+                }}
+              />
+              <div className="border-b min-h-[170px] max-h-[250px] overflow-hidden flex flex-col">
+                <div className="px-3 py-2 text-xs uppercase text-gray-500">Recent runs</div>
+                <RunList workflow={workflow} onSelect={(r) => setSelectedRun(r.run_id)} selected={selectedRun} />
+              </div>
+              <div className="border-b h-[240px] flex-none overflow-hidden">
+                <div className="px-3 py-2 text-xs uppercase text-gray-500">Approvals</div>
+                <ApprovalWorkbench onSelectRun={setSelectedRun} selectedRun={selectedRun} />
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                {selectedRun ? (
+                  <RunDetail runId={selectedRun} onSelectRun={setSelectedRun} />
+                ) : (
+                  <div className="p-4 text-sm text-gray-500">Select or start a run to see details, artifacts, and lineage.</div>
+                )}
+              </div>
+            </div>
+          )}
+          {workbenchTab === "improve" && (
+            <div className="h-full overflow-hidden">
+              <SpecInspector
+                topology={topo.data}
+                spec={spec.data}
+                selectedNodeId={selectedNode}
+                tab="propose"
+                onTabChange={setInspectorTab}
+                availableTabs={["propose"]}
+                title="Improve workflow"
+                onApplied={async () => {
+                  await Promise.all([spec.refetch(), topo.refetch()]);
+                }}
+              />
+            </div>
+          )}
+          {workbenchTab === "recover" && (
+            <div className="h-full overflow-hidden">
+              <SpecInspector
+                topology={topo.data}
+                spec={spec.data}
+                selectedNodeId={selectedNode}
+                tab="rollback"
+                onTabChange={setInspectorTab}
+                availableTabs={["rollback"]}
+                title="Recover source"
+                onApplied={async () => {
+                  await Promise.all([spec.refetch(), topo.refetch()]);
+                }}
+              />
+            </div>
           )}
         </div>
       </aside>

@@ -25,8 +25,81 @@ def _shape(metadata):
 def test_loads_yaml_graph_spec():
     spec = load_graph_spec("coder_tester")
     assert spec.name == "coder_tester"
+    assert spec.category == "coding"
+    assert spec.tags == ["code-generation", "testing"]
     assert spec.entry == "planner"
     assert {node.id for node in spec.nodes} == {"planner", "coder", "tester", "gate"}
+
+
+def test_graph_spec_accepts_library_metadata():
+    spec = GraphSpec.model_validate(
+        {
+            "name": "library_item",
+            "description": "A searchable workflow.",
+            "category": "rag",
+            "tags": ["retrieval", "example"],
+            "budget": {"cost_usd": 0.1, "latency_ms": 1000},
+            "entry": "a",
+            "nodes": [
+                {
+                    "id": "a",
+                    "kind": "llm",
+                    "model": "m",
+                    "system_prompt": "s",
+                    "user_prompt_template": "{user_input}",
+                    "output_state_key": "x",
+                }
+            ],
+        }
+    )
+
+    assert spec.category == "rag"
+    assert spec.tags == ["retrieval", "example"]
+
+
+def test_graph_spec_defaults_library_metadata():
+    spec = GraphSpec.model_validate(
+        {
+            "name": "library_item",
+            "budget": {"cost_usd": 0.1, "latency_ms": 1000},
+            "entry": "a",
+            "nodes": [
+                {
+                    "id": "a",
+                    "kind": "llm",
+                    "model": "m",
+                    "system_prompt": "s",
+                    "user_prompt_template": "{user_input}",
+                    "output_state_key": "x",
+                }
+            ],
+        }
+    )
+
+    assert spec.category == "general"
+    assert spec.tags == []
+
+
+def test_graph_spec_rejects_unknown_library_fields():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        GraphSpec.model_validate(
+            {
+                "name": "bad",
+                "author": "not supported",
+                "budget": {"cost_usd": 0.1, "latency_ms": 1000},
+                "entry": "a",
+                "nodes": [
+                    {
+                        "id": "a",
+                        "kind": "llm",
+                        "model": "m",
+                        "system_prompt": "s",
+                        "user_prompt_template": "{user_input}",
+                        "output_state_key": "x",
+                    }
+                ],
+            }
+        )
 
 
 def test_loads_approval_graph_spec():
@@ -335,7 +408,7 @@ nodes:
         load_graph_spec("a", specs_root=specs_root)
 
 
-def test_load_graph_spec_rejects_approval_subgraph_targets(tmp_path):
+def test_load_graph_spec_accepts_approval_subgraph_targets(tmp_path):
     specs_root = tmp_path / "workflows"
     specs_root.mkdir()
     (specs_root / "parent.yaml").write_text(
@@ -348,7 +421,7 @@ entry: child
 nodes:
   - id: child
     kind: subgraph
-    workflow: child
+    workflow: child_wf
     inputs:
       user_input: user_input
     outputs:
@@ -356,9 +429,9 @@ nodes:
 """.strip(),
         encoding="utf-8",
     )
-    (specs_root / "child.yaml").write_text(
+    (specs_root / "child_wf.yaml").write_text(
         f"""
-name: child
+name: child_wf
 budget:
   cost_usd: 0.1
   latency_ms: 1000
@@ -372,5 +445,15 @@ nodes:
 """.strip(),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="nested approval subgraphs are not supported in v1"):
-        load_graph_spec("parent", specs_root=specs_root)
+    spec = load_graph_spec("parent", specs_root=specs_root)
+    assert spec.name == "parent"
+    subgraph_node = next(node for node in spec.nodes if node.id == "child")
+    assert subgraph_node.workflow == "child_wf"
+
+
+def test_load_approval_subgraph_wrapper():
+    spec = load_graph_spec("approval_subgraph_wrapper")
+    assert spec.name == "approval_subgraph_wrapper"
+    subgraph_node = next(node for node in spec.nodes if node.id == "review_child")
+    assert subgraph_node.kind == "subgraph"
+    assert subgraph_node.workflow == "approval_review"

@@ -1,6 +1,10 @@
 schema_version: workflow.graph/v1
 name: dispatch_aggregate
 description: Dispatcher fans out to two specialists, then aggregates both outputs.
+category: orchestration
+tags:
+  - fanout
+  - aggregation
 budget:
   cost_usd: 0.60
   latency_ms: 300000

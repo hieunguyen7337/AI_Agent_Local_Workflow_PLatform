@@ -30,6 +30,7 @@ from backend.runtime.errors import (
     CancelledError,
     MaxIterationsError,
     PendingApprovalError,
+    PendingSubgraphApprovalError,
     WorkflowError,
 )
 from backend.runtime.nodes.approval import make_approval_dispatcher, make_approval_node
@@ -302,6 +303,12 @@ def run_graph(
                 status = "pending_approval"
                 error = None
                 last_state.update(pae.state_update)
+                final_state = last_state
+                span.set_attribute(WORKFLOW_STATUS, status)
+            except PendingSubgraphApprovalError as psae:
+                status = "pending_approval"
+                error = None
+                last_state.update(psae.state_update)
                 final_state = last_state
                 span.set_attribute(WORKFLOW_STATUS, status)
             except BudgetExceededError:

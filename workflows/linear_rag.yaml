@@ -1,6 +1,10 @@
 schema_version: workflow.graph/v1
 name: linear_rag
 description: Query analysis, local retrieval, reranking, and grounded synthesis.
+category: rag
+tags:
+  - retrieval
+  - synthesis
 budget:
   cost_usd: 0.50
   latency_ms: 240000

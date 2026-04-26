@@ -1,6 +1,10 @@
 schema_version: workflow.graph/v1
 name: approval_review
 description: Draft answer, pause for human approval, then finalize.
+category: approval
+tags:
+  - human-review
+  - pause-resume
 budget:
   cost_usd: 0.25
   latency_ms: 120000

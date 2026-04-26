@@ -46,6 +46,13 @@ class RoutingError(WorkflowError):
     pass
 
 
+class PendingSubgraphApprovalError(WorkflowError):
+    def __init__(self, pending: dict, state_update: dict | None = None):
+        super().__init__(f"pending subgraph approval at node {pending.get('node_id')!r}")
+        self.pending = pending
+        self.state_update = state_update or {}
+
+
 class SubgraphError(WorkflowError):
     def __init__(self, node_id: str, child_run_id: str, status: str, error: str | None = None):
         message = f"subgraph node {node_id!r} child run {child_run_id!r} finished with status {status!r}"

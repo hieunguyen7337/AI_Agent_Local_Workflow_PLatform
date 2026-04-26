@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from backend.builder.api import GraphBuilder, GraphMetadata
-from backend.builder.nodes import ApprovalNodeConfig, SubgraphNodeConfig
+from backend.builder.nodes import SubgraphNodeConfig
 from .models import BudgetSpec, EdgeSpec, GraphSpec, LoopSpec
 
 WORKFLOW_SPECS_ROOT = Path("workflows")
@@ -75,12 +75,6 @@ def _validate_subgraph_tree(
             raise FileNotFoundError(f"subgraph workflow {node.workflow!r} does not exist")
 
         child = _load_raw_graph_spec(node.workflow, specs_root=specs_root)
-        approval_nodes = [child_node.id for child_node in child.nodes if isinstance(child_node, ApprovalNodeConfig)]
-        if approval_nodes:
-            raise ValueError(
-                f"subgraph {node.id!r} references workflow {node.workflow!r} with approval nodes; "
-                "nested approval subgraphs are not supported in v1"
-            )
         _validate_subgraph_tree(
             node.workflow,
             child,
@@ -107,6 +101,10 @@ def graph_spec_to_metadata(spec: GraphSpec) -> GraphMetadata:
 
 def load_workflow_metadata(workflow_id: str, *, specs_root: Path = WORKFLOW_SPECS_ROOT) -> GraphMetadata:
     return graph_spec_to_metadata(load_graph_spec(workflow_id, specs_root=specs_root))
+
+
+def list_workflow_ids(specs_root: Path = WORKFLOW_SPECS_ROOT) -> list[str]:
+    return sorted(p.stem for p in specs_root.glob("*.yaml") if p.is_file())
 
 
 def builder_to_graph_spec(builder: GraphBuilder) -> GraphSpec:
