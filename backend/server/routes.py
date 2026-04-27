@@ -18,11 +18,12 @@ from backend.approvals import (
     decide_approval,
 )
 from backend.builder.api import GraphMetadata
-from backend.builder.nodes import ApprovalNodeConfig, GateNodeConfig, RouterNodeConfig
+from backend.builder.nodes import ApprovalNodeConfig, GateNodeConfig, RouterNodeConfig, SubgraphNodeConfig
 from backend.evals.harness import EVALS_ROOT, run_eval_for_metadata
 from backend.graphspec import (
     GraphSpec,
     apply_graph_spec_proposal,
+    copy_workflow_template,
     graph_spec_to_metadata,
     list_workflow_ids,
     load_graph_spec,
@@ -86,6 +87,15 @@ class ApprovalDecisionRequest(BaseModel):
     decision: str = Field(pattern="^(approved|rejected)$")
     reviewer: str | None = None
     comment: str | None = None
+
+
+class CopyTemplateRequest(BaseModel):
+    new_workflow_id: str = Field(min_length=1)
+    name: str | None = None
+    description: str | None = None
+    category: str | None = None
+    tags: list[str] | None = None
+    accepted_by: str | None = None
 
 
 def load_workflow(name: str) -> GraphMetadata:
@@ -178,8 +188,12 @@ def list_workflows() -> list[dict]:
     ids = list_workflow_ids(specs_root=WORKFLOW_SPECS_ROOT)
     result = []
     for wid in ids:
+        source_path = WORKFLOW_SPECS_ROOT / f"{wid}.yaml"
         try:
-            spec = load_graph_spec(wid, specs_root=WORKFLOW_SPECS_ROOT)
+            spec, _yaml_text, source_path = load_graph_spec_source(
+                wid,
+                specs_root=WORKFLOW_SPECS_ROOT,
+            )
             result.append(
                 {
                     "id": wid,
@@ -187,9 +201,14 @@ def list_workflows() -> list[dict]:
                     "description": spec.description,
                     "category": spec.category,
                     "tags": spec.tags,
+                    "template": spec.template,
+                    "validation_status": "valid",
+                    "validation_errors": [],
+                    "source_path": source_path.as_posix(),
+                    "facts": _workflow_facts(spec),
                 }
             )
-        except Exception:
+        except Exception as exc:
             result.append(
                 {
                     "id": wid,
@@ -197,9 +216,67 @@ def list_workflows() -> list[dict]:
                     "description": "",
                     "category": "general",
                     "tags": [],
+                    "template": False,
+                    "validation_status": "invalid",
+                    "validation_errors": [str(exc)],
+                    "source_path": source_path.as_posix(),
+                    "facts": _empty_workflow_facts(),
                 }
             )
     return result
+
+
+@router.post("/api/workflows/{workflow}/copy-template")
+def post_copy_workflow_template(workflow: str, request: CopyTemplateRequest) -> dict:
+    try:
+        copied = copy_workflow_template(
+            workflow=workflow,
+            new_workflow_id=request.new_workflow_id,
+            name=request.name,
+            description=request.description,
+            category=request.category,
+            tags=request.tags,
+            accepted_by=request.accepted_by,
+            specs_root=WORKFLOW_SPECS_ROOT,
+            audit_root=SPEC_AUDIT_ROOT,
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, f"workflow template {workflow!r} not found")
+    except FileExistsError as exc:
+        raise HTTPException(409, str(exc))
+    except (ValueError, ValidationError, yaml.YAMLError) as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(500, f"failed to copy workflow template: {exc}")
+    return {
+        "workflow": copied.workflow,
+        "source_template": copied.source_template,
+        "status": copied.status,
+        "source_path": copied.source_path.as_posix(),
+        "audit_path": copied.audit_path.as_posix(),
+        "spec": copied.spec.model_dump(mode="json"),
+        "yaml": copied.yaml_text,
+    }
+
+
+def _empty_workflow_facts() -> dict[str, int]:
+    return {
+        "node_count": 0,
+        "edge_count": 0,
+        "loop_count": 0,
+        "approval_node_count": 0,
+        "subgraph_node_count": 0,
+    }
+
+
+def _workflow_facts(spec: GraphSpec) -> dict[str, int]:
+    return {
+        "node_count": len(spec.nodes),
+        "edge_count": len(spec.edges),
+        "loop_count": len(spec.loops),
+        "approval_node_count": sum(isinstance(node, ApprovalNodeConfig) for node in spec.nodes),
+        "subgraph_node_count": sum(isinstance(node, SubgraphNodeConfig) for node in spec.nodes),
+    }
 
 
 @router.get("/api/graph/{workflow}")

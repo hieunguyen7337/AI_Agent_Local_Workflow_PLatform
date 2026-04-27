@@ -19,6 +19,7 @@ from .models import BudgetSpec, EdgeSpec, GraphSpec, LoopSpec
 from .apply import AppliedProposal, apply_graph_spec_proposal
 from .mutation import MutationProposal, propose_mutation
 from .optimization import OptimizationCandidate, OptimizationReport, optimize_proposals
+from .templates import CopiedTemplate, copy_workflow_template
 from .rollback import (
     RestoredRollback,
     RollbackPreview,
@@ -32,6 +33,7 @@ __all__ = [
     "AppliedProposal",
     "ApprovalNodeConfig",
     "BudgetSpec",
+    "CopiedTemplate",
     "EdgeSpec",
     "GraphSpec",
     "LoopSpec",
@@ -50,6 +52,7 @@ __all__ = [
     "load_graph_spec_source",
     "load_workflow_metadata",
     "apply_graph_spec_proposal",
+    "copy_workflow_template",
     "list_rollback_snapshots",
     "optimize_proposals",
     "preview_rollback_snapshot",

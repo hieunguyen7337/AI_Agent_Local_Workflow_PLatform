@@ -48,7 +48,7 @@ The Python builder is an internal metadata/compiler helper only. It is not a wor
 - Prefer `rg`/targeted file reads over broad directory scans.
 - Preserve local-first behavior: no hosted tracing, no cloud persistence, no hidden remote state.
 - Preserve YAML-only workflow loading. Do not restore Python workflow module fallback.
-- Keep mutation/apply flows human-reviewed. Do not auto-apply LLM suggestions.
+- Keep mutation/apply/template-copy flows human-reviewed. Do not auto-apply LLM suggestions or copy templates without confirmation.
 - Use existing patterns before adding abstractions.
 - Keep UI tool-first and graph-first. No landing pages or marketing screens.
 - Update `FUTURE_SCOPE.md` when a milestone graduates or a new deferred item is created.
@@ -85,7 +85,7 @@ Open `http://127.0.0.1:5173`.
 
 ## Next Milestone
 
-Use `FUTURE_SCOPE.md` as the authority. The current shipped baseline (M5.10) includes nested approval subgraphs, approval subgraph eval coverage, and a fully dynamic workflow selector driven by `GET /api/workflows`. The next milestone is workflow library conventions: organizing many YAML specs, examples, and pipeline templates so they remain discoverable without introducing a second authoring format.
+Use `FUTURE_SCOPE.md` as the authority. The current shipped baseline includes nested approval subgraphs, approval subgraph eval coverage, structured run artifacts, a workflow library selector driven by `GET /api/workflows` with metadata, validation health, source paths, and static graph facts, YAML-native reusable workflow templates copied through an audited human-confirmed flow, and convention-first template placeholders such as `{user_input}` that are copied unchanged. The next milestone is schema-backed template parameter metadata, only if conventions prove insufficient and without introducing substitution or a second authoring format.
 
 Do not start any new milestone by guessing. Read `FUTURE_SCOPE.md` and the relevant runtime/spec/frontend paths before designing.
 

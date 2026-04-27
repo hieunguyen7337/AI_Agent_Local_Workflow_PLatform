@@ -4,7 +4,7 @@ Use this checklist before adding major backend workflow capabilities. The goal i
 
 ## Scope
 
-- Workflows: `coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, `rag_subgraph_wrapper`
+- Workflows: `coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, `rag_subgraph_wrapper`, `approval_subgraph_wrapper`, `simple_llm_template`
 - Frontend: `http://127.0.0.1:5173`
 - Backend: `http://127.0.0.1:8000`
 - Workbench modes: `Inspect`, `Run`, `Improve`, `Recover`
@@ -31,10 +31,17 @@ npm run dev
 ## Inspect
 
 - Select each workflow and verify the graph renders.
+- Confirm the workflow selector groups workflows by category and the search box filters by id, name, description, category, and tags.
+- Confirm the library summary shows total, valid, and invalid counts, and that the selected workflow shows node/edge/loop/approval/subgraph facts.
+- Confirm template workflows are marked as `(template)` in the selector, can be found by searching `template`, and show `template` in the selected-workflow health/facts line.
+- With a temporary invalid workflow spec, confirm it remains visible as invalid and can be found by searching `invalid` or part of the validation error text.
 - Click every node kind used by the reference workflows: `llm`, `tester`, `retriever`, `gate`, `router`, `approval`, `subgraph`, `START`, `END`.
 - Confirm selected node metadata includes the fields needed to understand behavior, such as model/provider, prompts, state keys, routes, loop limits, retriever corpus, tester mode, and subgraph mappings.
 - Open the raw YAML source and confirm it matches the selected workflow.
 - Confirm validation status is visible and understandable.
+- Select `simple_llm_template`, confirm the Copy template form appears in Inspect, and confirm the copy button remains disabled until a new workflow id and confirmation are provided.
+- Confirm the Copy template form explains that prompt placeholders such as `{user_input}` are copied unchanged and customized afterward through normal source/proposal review.
+- Copy the template to a new lowercase snake_case id, then confirm the new workflow appears, is selected, validates, is not marked as a template, and has an audit entry under `runs/spec_audit/<new_workflow_id>/`.
 - For `rag_subgraph_wrapper`, select the subgraph node and open the child graph/source view without changing the parent workflow selector.
 
 ## Run
@@ -47,6 +54,7 @@ npm run dev
 - For `approval_review`, confirm the pending approval appears in the approvals panel and run detail.
 - Approve or reject one pending approval and confirm the source run shows decided status plus a continuation run link.
 - For `rag_subgraph_wrapper`, confirm parent run detail links to the child run and child run detail links back to the parent.
+- For `approval_subgraph_wrapper`, confirm the parent run surfaces pending child approval, deciding the child approval creates a parent continuation, and run detail exposes the nested lineage artifacts.
 
 ## Improve
 

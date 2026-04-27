@@ -1,7 +1,7 @@
-# Local AI Workflow Platform - M5.10
+# Local AI Workflow Platform - M5.13
 
 A local-first platform to author, run, visualize, and iterate on AI workflows.
-M5.10 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, and a fully dynamic API-driven workflow selector:
+M5.13 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, a searchable category-grouped workflow library selector with validation health signals, and YAML-native reusable workflow templates with convention-based placeholders:
 
 ## Vision
 
@@ -15,6 +15,7 @@ Each workflow should be built from a simple source-of-truth file that is easy fo
 - `dispatch_aggregate`: `dispatcher -> specialist_a + specialist_b -> aggregator -> END`
 - `approval_review`: `draft -> human_review approval -> (finalizer | END)`
 - `rag_subgraph_wrapper`: `rag_child subgraph(linear_rag) -> END`
+- `simple_llm_template`: copyable `template: true` starter workflow for creating normal canonical YAML workflows
 - `approval_subgraph_wrapper`: `review_child subgraph(approval_review) -> END` — reference fixture for nested approval pause/resume
 
 - Authoring: YAML workflow specs (`workflows/*.yaml`) backed by Pydantic `GraphSpec` (`backend/graphspec/`)
@@ -24,12 +25,12 @@ Each workflow should be built from a simple source-of-truth file that is easy fo
 - Budget: cost + latency enforcement after a node completes and before the next node dispatches
 - Tester: sandboxed Python execution (timeout/output guardrails) with LLM-judge fallback when no test code is provided
 - Evals: YAML fixtures -> Nx runs -> metrics JSON + confidence intervals + baseline regression checks
-- UI: FastAPI + React Flow topology + Inspect/Run/Improve/Recover workbench + proposal review/eval/apply + approval workbench + run list/detail + telemetry overlays + workflow selector + WebSocket live updates
+- UI: FastAPI + React Flow topology + Inspect/Run/Improve/Recover workbench + proposal review/eval/apply + template copy + approval workbench + run list/detail + telemetry overlays + searchable category-grouped workflow selector + WebSocket live updates
 - Providers: OpenRouter and direct OpenAI
 - Workflow defaults: `coder_tester` -> OpenRouter `minimax/minimax-m2.7`; `linear_rag`, `supervisor_loop`, and `dispatch_aggregate` -> OpenAI `gpt-4o-mini`
 - Pricing: provider/model rates loaded from `prices.yaml`; budget correctness does not depend on provider stream-abort support
 
-See [docs/graphspec_decision.md](docs/graphspec_decision.md) for the source-of-truth decision, [docs/run_artifacts.md](docs/run_artifacts.md) for how to inspect run files, [docs/ui_vision_audit.md](docs/ui_vision_audit.md) for the UI smoke checklist, [claude_full_plan.md](claude_full_plan.md) for the base architecture, and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
+See [docs/graphspec_decision.md](docs/graphspec_decision.md) for the source-of-truth decision, [docs/workflow_library.md](docs/workflow_library.md) for workflow library conventions, [docs/run_artifacts.md](docs/run_artifacts.md) for how to inspect run files, [docs/ui_vision_audit.md](docs/ui_vision_audit.md) for the UI smoke checklist, [claude_full_plan.md](claude_full_plan.md) for the base architecture, and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
 
 ## Full Setup (Windows PowerShell)
 
@@ -72,7 +73,7 @@ npm install
 cd ..
 ```
 
-## Verify M5.10 End-to-End
+## Verify M5.13 End-to-End
 
 From repo root (Windows commands shown):
 
@@ -226,12 +227,13 @@ npm run dev
 Open `http://127.0.0.1:5173`.
 
 Expected behavior:
-- workflow selector populates dynamically from `GET /api/workflows`; any `.yaml` file added to `workflows/` appears without touching frontend code; currently shows `approval_subgraph_wrapper`, `approval_review`, `coder_tester`, `dispatch_aggregate`, `linear_rag`, `rag_subgraph_wrapper`, `supervisor_loop`
+- workflow selector populates dynamically from `GET /api/workflows`; any `.yaml` file added to `workflows/` appears without touching frontend code; workflows are grouped by `category`, searchable by metadata, template status, and validation errors, and summarized with valid/invalid counts plus selected-workflow graph facts
+- template workflows are marked in the selector and health line; selecting `simple_llm_template` shows a human-confirmed Copy template form in Inspect with a reminder that prompt placeholders are copied unchanged
 - graph renders for selected workflow
 - selecting a graph node opens source metadata in the inspector
 - selecting a subgraph node can open the referenced child graph without changing the parent workflow selector
 - the right workbench is organized into `Inspect`, `Run`, `Improve`, and `Recover` modes while the graph remains the primary canvas
-- `Inspect` shows selected node metadata, raw YAML, validation status, and child subgraph inspection
+- `Inspect` shows selected node metadata, raw YAML, validation status, template copy controls, and child subgraph inspection
 - `Run` starts the selected workflow, shows recent runs, approvals, run detail, artifacts, and continuation lineage
 - `Improve` can propose YAML changes, generate multiple optimization candidates, evaluate them under a shared cost cap, and recommend a candidate for human review
 - `Recover` lists apply/restore snapshots, previews diffs, and restores selected YAML after confirmation
@@ -280,11 +282,13 @@ Expected behavior:
 - Canonical editable specs live in [workflows](workflows).
 - Specs are parsed by [backend/graphspec](backend/graphspec), validated as `GraphSpec`, and adapted to the existing runtime `GraphMetadata`.
 - CLI, eval, replay, and API loading use YAML specs only.
-- `/api/workflows` returns `[{id, name, description}]` for every `.yaml` file in `workflows/`; the frontend selector is fully API-driven.
+- `/api/workflows` returns `[{id, name, description, category, tags, template, validation_status, validation_errors, source_path, facts}]` for every `.yaml` file in `workflows/`; the frontend selector is fully API-driven, searchable, grouped by category, and shows validation health.
+- `POST /api/workflows/{workflow}/copy-template` copies a valid `template: true` workflow into a new canonical YAML spec after explicit confirmation. The new spec validates through `GraphSpec`, is written with `template: false`, preserves prompt/state placeholders such as `{user_input}` unchanged, and records `runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json`.
 - `/api/graph/{workflow}` returns topology plus full node metadata so the frontend can show both graph shape and node configuration.
 - `/api/spec/{workflow}` returns raw YAML plus validated `GraphSpec` JSON.
 - `/api/approvals?status=pending|decided|all` returns approval artifacts discovered under structured workflow run directories, with decision metadata when present.
 - YAML is the human/LLM editing format. Pydantic `GraphSpec` is the trusted contract.
+- Workflow library conventions, recommended categories, template placeholder conventions, and deferred subdirectory guidance are documented in [docs/workflow_library.md](docs/workflow_library.md).
 
 ## Workbench Inspection And Proposal Review
 
@@ -353,6 +357,7 @@ Expected behavior:
 - [workflows/approval_review.yaml](workflows/approval_review.yaml)
 - [workflows/rag_subgraph_wrapper.yaml](workflows/rag_subgraph_wrapper.yaml)
 - [workflows/approval_subgraph_wrapper.yaml](workflows/approval_subgraph_wrapper.yaml)
+- [workflows/simple_llm_template.yaml](workflows/simple_llm_template.yaml)
 
 2. GraphSpec, builder, and compilation
 - [backend/graphspec/models.py](backend/graphspec/models.py)
@@ -423,11 +428,15 @@ runs/proposal_eval_<workflow>_<timestamp>/eval.json
 runs/optimization_<workflow>_<timestamp>/report.json
 runs/spec_audit/<workflow>/<timestamp>/audit.json
 runs/spec_audit/<workflow>/<timestamp>/original.yaml
+runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json
 ```
 
-## M5.10 Limits (by design)
+## M5.13 Limits (by design)
 
-- Seven reference workflows (`coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, `rag_subgraph_wrapper`, `approval_subgraph_wrapper`); the selector is dynamic so new `.yaml` files appear automatically
+- Seven reference workflows plus one copyable starter template; the selector is dynamic so new `.yaml` files appear automatically and are grouped by YAML `category`
+- Workflow specs remain flat under `workflows/*.yaml`; subdirectories and path-like workflow ids are deferred until category/tag navigation is insufficient
+- Workflow library health is static YAML validation plus graph facts only; eval fixture readiness, baseline freshness, and latest run history are deferred
+- Templates are normal executable YAML workflows marked with `template: true`; copy preserves placeholders unchanged, and parameter substitution plus template-specific input schemas are deferred
 - Two direct providers only (`openrouter`, `openai`)
 - YAML workflow specs are the editable source of truth; legacy Python workflow modules are no longer a runtime fallback
 - Mutation proposals and proposal evals are read-only until a human explicitly applies a valid proposal

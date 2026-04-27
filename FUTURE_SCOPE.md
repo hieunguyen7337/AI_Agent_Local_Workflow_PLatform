@@ -1,6 +1,6 @@
 # Future Scope
 
-This file tracks deliberately deferred work beyond M5.7. It should stay aligned with the product vision:
+This file tracks deliberately deferred work beyond the current baseline. It should stay aligned with the product vision:
 
 - YAML `GraphSpec` files are the simple source of truth for workflows.
 - LLMs should be able to read, analyze, propose mutations, and iterate on that source of truth.
@@ -25,11 +25,14 @@ Entries should be pruned or moved when they graduate into implemented milestones
 - **Multi-proposal optimization loop** - the app can generate multiple YAML mutation candidates, evaluate them under a shared cost cap, rank them, and recommend one for human review.
 - **Rollback restore flow** - rollback snapshots can be listed, previewed, and restored after human confirmation, with a new audit record for restore actions.
 - **YAML-only workflow loading** - CLI, replay, evals, API, graph export, and tests load canonical YAML specs without Python workflow module fallback. The Python builder remains only as an internal metadata/compiler helper.
-- **Nested approval subgraphs** - child subgraph pauses on an approval node surface as parent `pending_approval`; child decisions auto-fork a parent continuation run; lineage links parent source ↔ child source ↔ child continuation ↔ parent continuation via `pending_subgraph_approval.json`, `subgraph_decision.json`, and `subgraph_resume.json`.
+- **Nested approval subgraphs** - child subgraph pauses on an approval node surface as parent `pending_approval`; child decisions auto-fork a parent continuation run; lineage links parent source, child source, child continuation, and parent continuation via `pending_subgraph_approval.json`, `subgraph_decision.json`, and `subgraph_resume.json`.
 - **Approval subgraph eval coverage** - `approval_subgraph_wrapper` has fixture-driven eval support; the harness detects nested approval runs, routes `decide_approval` to the child run id, and scores against the parent continuation's final state.
 - **Structured run artifacts** - execution runs are stored by workflow/date with readable run ids, manifests, artifact paths in the API/UI, and documentation for inspecting JSONL and SQLite files.
 - **UI workbench cleanup** - the frontend keeps the graph canvas primary and organizes the review surface into Inspect, Run, Improve, and Recover modes so the source-of-truth loop is easier to follow.
-- **Dynamic workflow list** - `GET /api/workflows` scans `workflows/*.yaml` and returns `[{id, name, description}]`; the frontend selector is fully API-driven so any `.yaml` file dropped into `workflows/` is immediately discoverable without touching frontend code.
+- **Workflow library conventions** - `GraphSpec` includes `category` and `tags` metadata; `GET /api/workflows` scans flat `workflows/*.yaml` and returns `[{id, name, description, category, tags}]`; the frontend selector is API-driven, searchable, and grouped by category.
+- **Workflow library health signals** - workflow summaries include validation status, validation errors, source path, and static graph facts so invalid YAML remains discoverable and repairable.
+- **Reusable workflow templates** - YAML workflows can opt into template status with `template: true`; templates remain valid executable `GraphSpec` files, appear in `/api/workflows`, and can be copied through a human-confirmed UI/API flow that writes a new canonical workflow YAML with `template: false` plus a local audit record.
+- **Template parameterization conventions** - templates may use normal runtime prompt/state placeholders such as `{user_input}`; copy preserves placeholders unchanged, and customization remains part of the normal YAML source/proposal/apply loop.
 
 ## Product usability
 
@@ -40,17 +43,19 @@ Entries should be pruned or moved when they graduate into implemented milestones
 
 ## Next product milestone
 
-- **Workflow library conventions** - add conventions for organizing many YAML workflow specs, examples, and reusable pipeline templates so they remain discoverable and the source-of-truth model stays intact.
+- **Schema-backed template parameter metadata** - consider YAML-native metadata for documenting expected template inputs only after convention-only templates prove insufficient. Do not add substitution, a preprocessor, a manifest, or a second authoring format without a concrete copied-template workflow that needs it.
 
 ## Workflow capabilities
 
 - **Inline subgraph editing** - child graph inspection is read-only; editing still happens through the YAML proposal/apply loop.
-- **Reusable workflow library** - add conventions for organizing many YAML workflow specs, examples, and reusable pipeline templates without introducing a second authoring format.
+- **Library quality signals beyond validation** - eval fixture presence, baseline freshness, and latest run status are intentionally deferred until the product needs operational library quality rather than static YAML health.
+- **Template parameter execution** - typed template variables, wizard-driven substitution, required input schemas, and placeholder replacement are deferred until the project has enough copied-template usage to justify moving beyond conventions.
 
 ## Technical debt and compatibility
 
 - **CLI `--set` deep overrides** - M1 supports one level deep only (`--set node.field=value`). Add deeper override syntax only when real use cases appear.
 - **Spec patch format** - current proposals use full YAML rewrites plus unified diffs. If smaller proposal payloads become necessary, design YAML-native constrained edit operations instead of adding another source format.
+- **Workflow subdirectories** - flat `workflows/*.yaml` remains the canonical layout. Reconsider subdirectories only if category/tag navigation is insufficient, because path-like workflow ids would affect loader, CLI, eval fixtures, subgraph references, API routes, and frontend selection.
 - **OTEL GenAI semconv churn** - attribute names are isolated in `telemetry/genai_attrs.py`; update only when the upstream convention stabilizes.
 
 ## Explicitly rejected

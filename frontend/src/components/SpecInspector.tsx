@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   applySpecProposal,
+  copyWorkflowTemplate,
   evaluateSpecProposal,
   fetchRollbackPreview,
   fetchRollbackSnapshots,
@@ -14,6 +15,7 @@ import {
 import GraphView from "./GraphView";
 import type {
   ApplyProposalResponse,
+  CopyTemplateResponse,
   GraphNode,
   MutationProposalResponse,
   OptimizationCandidate,
@@ -162,6 +164,7 @@ export default function SpecInspector({
   tab,
   onTabChange,
   onApplied,
+  onTemplateCopied,
   availableTabs,
   title = "Source inspector",
 }: {
@@ -171,6 +174,7 @@ export default function SpecInspector({
   tab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
   onApplied?: () => void | Promise<void>;
+  onTemplateCopied?: (workflow: string) => void | Promise<void>;
   availableTabs?: InspectorTab[];
   title?: string;
 }) {
@@ -209,6 +213,16 @@ export default function SpecInspector({
   const [rollbackError, setRollbackError] = useState<string | undefined>(undefined);
   const [isRestoringRollback, setIsRestoringRollback] = useState(false);
   const [openedChildWorkflow, setOpenedChildWorkflow] = useState<string | undefined>(undefined);
+  const [copyWorkflowId, setCopyWorkflowId] = useState("");
+  const [copyName, setCopyName] = useState("");
+  const [copyDescription, setCopyDescription] = useState("");
+  const [copyCategory, setCopyCategory] = useState("");
+  const [copyTags, setCopyTags] = useState("");
+  const [copyAcceptedBy, setCopyAcceptedBy] = useState("local-user");
+  const [copyConfirmed, setCopyConfirmed] = useState(false);
+  const [copyResult, setCopyResult] = useState<CopyTemplateResponse | undefined>(undefined);
+  const [copyError, setCopyError] = useState<string | undefined>(undefined);
+  const [isCopyingTemplate, setIsCopyingTemplate] = useState(false);
 
   const selectedSubgraphWorkflow =
     selectedNode?.kind === "subgraph" && typeof selectedNode.metadata?.workflow === "string"
@@ -255,6 +269,15 @@ export default function SpecInspector({
     setRollbackResult(undefined);
     setRollbackError(undefined);
     setOpenedChildWorkflow(undefined);
+    setCopyWorkflowId("");
+    setCopyName("");
+    setCopyDescription("");
+    setCopyCategory("");
+    setCopyTags("");
+    setCopyAcceptedBy("local-user");
+    setCopyConfirmed(false);
+    setCopyResult(undefined);
+    setCopyError(undefined);
   }, [spec?.workflow]);
 
   useEffect(() => {
@@ -399,6 +422,34 @@ export default function SpecInspector({
     }
   }
 
+  async function submitTemplateCopy() {
+    if (!spec || !copyConfirmed || !copyWorkflowId.trim() || isCopyingTemplate) return;
+    setIsCopyingTemplate(true);
+    setCopyError(undefined);
+    setCopyResult(undefined);
+    try {
+      const tags = copyTags
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const result = await copyWorkflowTemplate(spec.workflow, {
+        new_workflow_id: copyWorkflowId.trim(),
+        name: copyName.trim() || undefined,
+        description: copyDescription.trim() || undefined,
+        category: copyCategory.trim() || undefined,
+        tags: tags.length > 0 ? tags : undefined,
+        accepted_by: copyAcceptedBy.trim() || undefined,
+      });
+      setCopyResult(result);
+      setCopyConfirmed(false);
+      await onTemplateCopied?.(result.workflow);
+    } catch (error) {
+      setCopyError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsCopyingTemplate(false);
+    }
+  }
+
   const selectedCandidate = optimization?.candidates.find(
     (candidate) => candidate.candidate_id === selectedCandidateId
   );
@@ -430,6 +481,105 @@ export default function SpecInspector({
       <div className="flex-1 overflow-y-auto p-3">
         {tab === "node" && (
           <div className="space-y-3">
+            {spec?.spec.template && (
+              <div className="space-y-3 rounded border border-violet-200 bg-violet-50 p-3">
+                <div>
+                  <div className="text-xs font-medium text-violet-950">Copy template</div>
+                  <div className="text-xs text-violet-900">
+                    Copy this YAML template into a new canonical workflow. The copy is written with template: false.
+                  </div>
+                  <div className="mt-1 text-xs text-violet-900">
+                    Prompt placeholders such as {"{user_input}"} are copied unchanged; customize them after copy through the normal source or proposal flow.
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="space-y-1">
+                    <div className="text-[11px] uppercase tracking-wide text-violet-700">New workflow id</div>
+                    <input
+                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      value={copyWorkflowId}
+                      onChange={(event) => setCopyWorkflowId(event.target.value)}
+                      placeholder="my_new_workflow"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Accepted by</div>
+                    <input
+                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      value={copyAcceptedBy}
+                      onChange={(event) => setCopyAcceptedBy(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="space-y-1">
+                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Name</div>
+                    <input
+                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      value={copyName}
+                      onChange={(event) => setCopyName(event.target.value)}
+                      placeholder="defaults to workflow id"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Category</div>
+                    <input
+                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      value={copyCategory}
+                      onChange={(event) => setCopyCategory(event.target.value)}
+                      placeholder="defaults to template category"
+                    />
+                  </label>
+                </div>
+                <label className="space-y-1 block">
+                  <div className="text-[11px] uppercase tracking-wide text-violet-700">Description</div>
+                  <textarea
+                    className="h-14 w-full resize-none rounded border border-violet-200 bg-white p-1.5 text-xs"
+                    value={copyDescription}
+                    onChange={(event) => setCopyDescription(event.target.value)}
+                    placeholder="defaults to template description"
+                  />
+                </label>
+                <label className="space-y-1 block">
+                  <div className="text-[11px] uppercase tracking-wide text-violet-700">Tags</div>
+                  <input
+                    className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                    value={copyTags}
+                    onChange={(event) => setCopyTags(event.target.value)}
+                    placeholder="comma-separated, defaults to template tags"
+                  />
+                </label>
+                <label className="flex items-start gap-2 text-xs text-violet-950">
+                  <input
+                    className="mt-0.5"
+                    type="checkbox"
+                    checked={copyConfirmed}
+                    onChange={(event) => setCopyConfirmed(event.target.checked)}
+                  />
+                  <span>I reviewed this template and want to create a new canonical workflow YAML file.</span>
+                </label>
+                <button
+                  type="button"
+                  className="w-fit rounded border border-violet-900 bg-violet-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                  disabled={!copyConfirmed || !copyWorkflowId.trim() || isCopyingTemplate}
+                  onClick={submitTemplateCopy}
+                >
+                  {isCopyingTemplate ? "Copying..." : "Copy template"}
+                </button>
+                {copyError && (
+                  <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                    {copyError}
+                  </div>
+                )}
+                {copyResult && (
+                  <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                    <div className="font-medium">Copied to {copyResult.workflow}</div>
+                    <Field label="Source Path" value={copyResult.source_path} mono />
+                    <Field label="Audit Path" value={copyResult.audit_path} mono />
+                  </div>
+                )}
+              </div>
+            )}
             {!selectedNode && <div className="text-sm text-slate-500">Select a graph node to inspect its source metadata.</div>}
             {selectedNode && nodeFields(selectedNode).map((field) => <Field key={field.label} {...field} />)}
             {selectedSubgraphWorkflow && (

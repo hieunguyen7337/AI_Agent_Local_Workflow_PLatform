@@ -31,10 +31,57 @@ function categoryLabel(category: string) {
 function workflowMatchesSearch(workflow: WorkflowSummary, search: string) {
   const query = search.trim().toLowerCase();
   if (query === "") return true;
-  return [workflow.id, workflow.name, workflow.description, workflow.category, ...workflow.tags]
+  return [
+    workflow.id,
+    workflow.name,
+    workflow.description,
+    workflow.category,
+    workflow.template ? "template" : "",
+    workflow.validation_status,
+    workflow.source_path,
+    ...workflow.tags,
+    ...workflow.validation_errors,
+  ]
     .join(" ")
     .toLowerCase()
     .includes(query);
+}
+
+function workflowOptionLabel(workflow: WorkflowSummary) {
+  if (workflow.validation_status === "invalid") {
+    return `${workflow.name} (invalid)`;
+  }
+  if (workflow.template) {
+    return `${workflow.name} (template)`;
+  }
+  return workflow.name;
+}
+
+function workflowOptionTitle(workflow: WorkflowSummary) {
+  return [
+    workflow.description,
+    workflow.source_path,
+    workflow.template ? "template" : "",
+    workflow.tags.join(", "),
+    ...workflow.validation_errors,
+  ].filter(Boolean).join(" | ");
+}
+
+function workflowFactSummary(workflow: WorkflowSummary | undefined) {
+  if (!workflow) return "";
+  const parts = [
+    workflow.template ? "template" : workflow.validation_status,
+    `${workflow.facts.node_count} nodes`,
+    `${workflow.facts.edge_count} edges`,
+  ];
+  if (workflow.facts.loop_count > 0) parts.push(`${workflow.facts.loop_count} loops`);
+  if (workflow.facts.approval_node_count > 0) {
+    parts.push(`${workflow.facts.approval_node_count} approval`);
+  }
+  if (workflow.facts.subgraph_node_count > 0) {
+    parts.push(`${workflow.facts.subgraph_node_count} subgraph`);
+  }
+  return parts.join(" · ");
 }
 
 export default function App() {
@@ -111,6 +158,15 @@ export default function App() {
   }, [groupedWorkflows, selectedWorkflowSummary, workflowSearch]);
 
   const filteredWorkflowCount = groupedWorkflows.reduce((count, group) => count + group.items.length, 0);
+  const workflowHealth = useMemo(() => {
+    const items = workflows.data ?? [];
+    const valid = items.filter((item) => item.validation_status === "valid").length;
+    return {
+      total: items.length,
+      valid,
+      invalid: items.length - valid,
+    };
+  }, [workflows.data]);
 
   return (
     <div
@@ -138,13 +194,31 @@ export default function App() {
           {visibleGroupedWorkflows.map((group) => (
             <optgroup key={group.category} label={categoryLabel(group.category)}>
               {group.items.map((w) => (
-                <option key={w.id} value={w.id} title={[w.description, w.tags.join(", ")].filter(Boolean).join(" | ")}>
-                  {w.name}
+                <option key={w.id} value={w.id} title={workflowOptionTitle(w)}>
+                  {workflowOptionLabel(w)}
                 </option>
               ))}
             </optgroup>
           ))}
         </select>
+        {workflows.data && (
+          <div className="min-w-0 text-xs text-slate-500">
+            <span className="font-medium text-slate-700">{workflowHealth.total}</span> workflows ·{" "}
+            <span className="text-emerald-700">{workflowHealth.valid}</span> valid ·{" "}
+            <span className={workflowHealth.invalid > 0 ? "text-red-700" : "text-slate-500"}>
+              {workflowHealth.invalid}
+            </span>{" "}
+            invalid
+            {selectedWorkflowSummary && (
+              <span>
+                {" · "}
+                <span className={selectedWorkflowSummary.validation_status === "invalid" ? "text-red-700" : ""}>
+                  {workflowFactSummary(selectedWorkflowSummary)}
+                </span>
+              </span>
+            )}
+          </div>
+        )}
       </header>
       <div className="border-r min-w-0">
         {topo.isLoading && <div className="p-4 text-sm text-gray-500">Loading topology...</div>}
@@ -203,6 +277,11 @@ export default function App() {
                 onTabChange={setInspectorTab}
                 availableTabs={["node", "source", "validation"]}
                 title="Inspect source"
+                onTemplateCopied={async (newWorkflowId) => {
+                  await workflows.refetch();
+                  setWorkflowSearch("");
+                  setWorkflow(newWorkflowId);
+                }}
               />
             </div>
           )}

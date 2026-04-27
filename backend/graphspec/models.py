@@ -56,6 +56,7 @@ class GraphSpec(BaseModel):
     description: str = ""
     category: str = "general"
     tags: list[str] = Field(default_factory=list)
+    template: bool = False
     budget: BudgetSpec
     entry: str
     nodes: list[GraphNodeSpec]

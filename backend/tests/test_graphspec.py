@@ -38,6 +38,7 @@ def test_graph_spec_accepts_library_metadata():
             "description": "A searchable workflow.",
             "category": "rag",
             "tags": ["retrieval", "example"],
+            "template": True,
             "budget": {"cost_usd": 0.1, "latency_ms": 1000},
             "entry": "a",
             "nodes": [
@@ -55,6 +56,7 @@ def test_graph_spec_accepts_library_metadata():
 
     assert spec.category == "rag"
     assert spec.tags == ["retrieval", "example"]
+    assert spec.template is True
 
 
 def test_graph_spec_defaults_library_metadata():
@@ -78,6 +80,7 @@ def test_graph_spec_defaults_library_metadata():
 
     assert spec.category == "general"
     assert spec.tags == []
+    assert spec.template is False
 
 
 def test_graph_spec_rejects_unknown_library_fields():

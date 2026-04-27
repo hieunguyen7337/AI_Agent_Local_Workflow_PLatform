@@ -1174,6 +1174,17 @@ def test_list_workflows_endpoint(monkeypatch, tmp_path: Path):
     assert items[0]["description"] == "First workflow"
     assert items[0]["category"] == "general"
     assert items[0]["tags"] == []
+    assert items[0]["template"] is False
+    assert items[0]["validation_status"] == "valid"
+    assert items[0]["validation_errors"] == []
+    assert items[0]["source_path"].endswith("alpha.yaml")
+    assert items[0]["facts"] == {
+        "node_count": 1,
+        "edge_count": 0,
+        "loop_count": 0,
+        "approval_node_count": 0,
+        "subgraph_node_count": 0,
+    }
     assert items[1]["id"] == "beta"
     assert items[1]["name"] == "Beta Workflow"
 
@@ -1195,6 +1206,17 @@ def test_list_workflows_broken_spec_still_listed(monkeypatch, tmp_path: Path):
     assert broken["description"] == ""
     assert broken["category"] == "general"
     assert broken["tags"] == []
+    assert broken["template"] is False
+    assert broken["validation_status"] == "invalid"
+    assert broken["validation_errors"]
+    assert broken["source_path"].endswith("broken.yaml")
+    assert broken["facts"] == {
+        "node_count": 0,
+        "edge_count": 0,
+        "loop_count": 0,
+        "approval_node_count": 0,
+        "subgraph_node_count": 0,
+    }
 
 
 def test_list_workflows_endpoint_returns_library_metadata(monkeypatch, tmp_path: Path):
@@ -1217,5 +1239,205 @@ def test_list_workflows_endpoint_returns_library_metadata(monkeypatch, tmp_path:
             "description": "Has metadata",
             "category": "rag",
             "tags": ["retrieval", "example"],
+            "template": False,
+            "validation_status": "valid",
+            "validation_errors": [],
+            "source_path": (specs_root / "searchable.yaml").as_posix(),
+            "facts": {
+                "node_count": 1,
+                "edge_count": 0,
+                "loop_count": 0,
+                "approval_node_count": 0,
+                "subgraph_node_count": 0,
+            },
         }
     ]
+
+
+def test_list_workflows_invalid_graphspec_still_listed_with_errors(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "invalid.yaml").write_text(
+        (
+            "schema_version: workflow.graph/v1\n"
+            "name: Invalid\n"
+            "entry: missing\n"
+            "nodes: []\n"
+            "budget:\n"
+            "  cost_usd: 1.0\n"
+            "  latency_ms: 30000\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["id"] == "invalid"
+    assert body[0]["validation_status"] == "invalid"
+    assert body[0]["validation_errors"]
+    assert "entry node" in body[0]["validation_errors"][0]
+    assert body[0]["facts"]["node_count"] == 0
+
+
+def test_list_workflows_counts_approval_and_subgraph_nodes(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "child_wf.yaml").write_text(
+        _minimal_spec("Child", "Child workflow", "child_node"),
+        encoding="utf-8",
+    )
+    (specs_root / "review_wrapper.yaml").write_text(
+        (
+            "schema_version: workflow.graph/v1\n"
+            "name: Review Wrapper\n"
+            "description: Approval and subgraph facts.\n"
+            "entry: review\n"
+            "nodes:\n"
+            "  - id: review\n"
+            "    kind: approval\n"
+            "    prompt: Review this.\n"
+            "    approved_target: child\n"
+            "    rejected_target: __end__\n"
+            "  - id: child\n"
+            "    kind: subgraph\n"
+            "    workflow: child_wf\n"
+            "    inputs:\n"
+            "      user_input: user_input\n"
+            "    outputs:\n"
+            "      final_answer: answer\n"
+            "budget:\n"
+            "  cost_usd: 1.0\n"
+            "  latency_ms: 30000\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    wrapper = next(item for item in resp.json() if item["id"] == "review_wrapper")
+    assert wrapper["validation_status"] == "valid"
+    assert wrapper["facts"] == {
+        "node_count": 2,
+        "edge_count": 0,
+        "loop_count": 0,
+        "approval_node_count": 1,
+        "subgraph_node_count": 1,
+    }
+
+
+def _template_spec(name: str = "Template") -> str:
+    return _minimal_spec(name, "Copy me", "node_t").replace(
+        "description: Copy me\n",
+        "description: Copy me\ncategory: template\ntags:\n  - starter\ntemplate: true\n",
+    )
+
+
+def test_list_workflows_endpoint_returns_template_flag(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "starter.yaml").write_text(_template_spec("Starter"), encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["id"] == "starter"
+    assert body[0]["template"] is True
+
+
+def test_copy_template_writes_new_workflow_and_audit(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    audit_root = tmp_path / "runs" / "spec_audit"
+    (specs_root / "starter.yaml").write_text(_template_spec("Starter"), encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "SPEC_AUDIT_ROOT", audit_root)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/workflows/starter/copy-template",
+        json={
+            "new_workflow_id": "copied_workflow",
+            "description": "Copied workflow.",
+            "category": "general",
+            "tags": ["copied"],
+            "accepted_by": "tester",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["workflow"] == "copied_workflow"
+    assert body["source_template"] == "starter"
+    assert body["status"] == "copied"
+    assert body["source_path"] == (specs_root / "copied_workflow.yaml").as_posix()
+    assert body["spec"]["name"] == "copied_workflow"
+    assert body["spec"]["description"] == "Copied workflow."
+    assert body["spec"]["category"] == "general"
+    assert body["spec"]["tags"] == ["copied"]
+    assert body["spec"]["template"] is False
+    written = specs_root / "copied_workflow.yaml"
+    assert written.exists()
+    assert "template: false" in written.read_text(encoding="utf-8")
+    audit = json.loads((Path(body["audit_path"]) / "audit.json").read_text(encoding="utf-8"))
+    assert audit["action"] == "template_copy"
+    assert audit["source_template"] == "starter"
+    assert audit["workflow"] == "copied_workflow"
+    assert audit["accepted_by"] == "tester"
+
+
+def test_copy_template_rejects_non_template_source(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "regular.yaml").write_text(_minimal_spec("Regular", "Not a template", "node_r"), encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/workflows/regular/copy-template",
+        json={"new_workflow_id": "copy_target"},
+    )
+    assert resp.status_code == 400
+    assert "not a template" in resp.text
+
+
+def test_copy_template_rejects_invalid_or_existing_target(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "starter.yaml").write_text(_template_spec("Starter"), encoding="utf-8")
+    (specs_root / "existing.yaml").write_text(_minimal_spec("Existing", "Existing", "node_e"), encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    invalid = client.post(
+        "/api/workflows/starter/copy-template",
+        json={"new_workflow_id": "Bad-Id"},
+    )
+    assert invalid.status_code == 400
+
+    existing = client.post(
+        "/api/workflows/starter/copy-template",
+        json={"new_workflow_id": "existing"},
+    )
+    assert existing.status_code == 409
+
+
+def test_copy_template_rejects_invalid_metadata_override(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    specs_root.mkdir()
+    (specs_root / "starter.yaml").write_text(_template_spec("Starter"), encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/workflows/starter/copy-template",
+        json={"new_workflow_id": "bad_copy", "tags": "not-a-list"},
+    )
+    assert resp.status_code == 422
+    assert not (specs_root / "bad_copy.yaml").exists()

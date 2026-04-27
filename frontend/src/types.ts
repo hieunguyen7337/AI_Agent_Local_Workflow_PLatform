@@ -4,6 +4,17 @@ export interface WorkflowSummary {
   description: string;
   category: string;
   tags: string[];
+  template: boolean;
+  validation_status: "valid" | "invalid";
+  validation_errors: string[];
+  source_path: string;
+  facts: {
+    node_count: number;
+    edge_count: number;
+    loop_count: number;
+    approval_node_count: number;
+    subgraph_node_count: number;
+  };
 }
 
 export type NodeKind = "llm" | "tester" | "gate" | "retriever" | "router" | "approval" | "subgraph";
@@ -48,6 +59,7 @@ export interface WorkflowSpecResponse {
     description: string;
     category: string;
     tags: string[];
+    template: boolean;
     budget: {
       cost_usd: number;
       latency_ms: number;
@@ -204,6 +216,25 @@ export interface RestoreRollbackResponse {
   audit_path: string;
   rollback_path: string;
   diff: string;
+  spec: WorkflowSpecResponse["spec"];
+  yaml: string;
+}
+
+export interface CopyTemplateRequest {
+  new_workflow_id: string;
+  name?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  accepted_by?: string;
+}
+
+export interface CopyTemplateResponse {
+  workflow: string;
+  source_template: string;
+  status: "copied";
+  source_path: string;
+  audit_path: string;
   spec: WorkflowSpecResponse["spec"];
   yaml: string;
 }

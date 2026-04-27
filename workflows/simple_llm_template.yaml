@@ -1,0 +1,29 @@
+schema_version: workflow.graph/v1
+name: simple_llm_template
+description: Starter single-LLM workflow template for copying into a new workflow.
+category: template
+tags:
+  - starter
+  - llm
+  - copyable
+  - parameterized
+template: true
+budget:
+  cost_usd: 0.25
+  latency_ms: 120000
+entry: respond
+nodes:
+  - id: respond
+    kind: llm
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: >-
+      You are a concise assistant. Answer the user's task directly.
+    user_prompt_template: |-
+      Task:
+      {user_input}
+    output_state_key: final_answer
+    temperature: 0.2
+edges:
+  - from: respond
+    to: __end__

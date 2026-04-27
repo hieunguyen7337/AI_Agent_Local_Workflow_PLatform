@@ -4,6 +4,8 @@ import type {
   ApprovalDecisionRequest,
   ApprovalDecisionResponse,
   ApprovalSummary,
+  CopyTemplateRequest,
+  CopyTemplateResponse,
   MutationProposalRequest,
   MutationProposalResponse,
   NodeMetricsResponse,
@@ -29,6 +31,22 @@ const BASE = "";
 export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
   const r = await fetch(`${BASE}/api/workflows`);
   if (!r.ok) throw new Error(`workflows fetch ${r.status}`);
+  return r.json();
+}
+
+export async function copyWorkflowTemplate(
+  workflow: string,
+  payload: CopyTemplateRequest
+): Promise<CopyTemplateResponse> {
+  const r = await fetch(`${BASE}/api/workflows/${workflow}/copy-template`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || `template copy ${r.status}`);
+  }
   return r.json();
 }
 
