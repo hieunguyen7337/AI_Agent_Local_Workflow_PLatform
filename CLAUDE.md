@@ -85,7 +85,7 @@ Open `http://127.0.0.1:5173`.
 
 ## Next Milestone
 
-Use `FUTURE_SCOPE.md` as the authority. The current shipped baseline includes nested approval subgraphs, approval subgraph eval coverage, structured run artifacts, a workflow library selector driven by `GET /api/workflows` with metadata, validation health, source paths, and static graph facts, YAML-native reusable workflow templates copied through an audited human-confirmed flow, and convention-first template placeholders such as `{user_input}` that are copied unchanged. The next milestone is schema-backed template parameter metadata, only if conventions prove insufficient and without introducing substitution or a second authoring format.
+Use `FUTURE_SCOPE.md` as the authority. The current shipped baseline includes nested approval subgraphs, approval subgraph eval coverage, structured run artifacts, a workflow library selector driven by `GET /api/workflows` with metadata, validation health, source paths, and static graph facts, YAML-native reusable workflow templates copied through an audited human-confirmed flow, convention-first template placeholders such as `{user_input}` that are copied unchanged, read-only `template_parameters` metadata for expected inputs, and local template-copy ergonomics. The next milestone is workflow library quality signals beyond validation, focused on eval fixture presence and baseline freshness without latest run history.
 
 Do not start any new milestone by guessing. Read `FUTURE_SCOPE.md` and the relevant runtime/spec/frontend paths before designing.
 

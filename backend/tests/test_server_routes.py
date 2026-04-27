@@ -213,6 +213,22 @@ def test_get_spec_supervisor_loop_includes_router_routes():
     assert dispatch["routes"]["FINISH"] == "__end__"
 
 
+def test_get_spec_template_includes_template_parameters():
+    client = TestClient(app)
+    resp = client.get("/api/spec/simple_llm_template")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["spec"]["template"] is True
+    assert body["spec"]["template_parameters"] == [
+        {
+            "key": "user_input",
+            "description": "Primary task text supplied when the copied workflow runs.",
+            "state_key": "user_input",
+            "example": "Summarize this note in three bullets.",
+        }
+    ]
+
+
 def test_get_spec_missing_workflow_returns_404():
     client = TestClient(app)
     resp = client.get("/api/spec/not_a_workflow")
@@ -1175,6 +1191,7 @@ def test_list_workflows_endpoint(monkeypatch, tmp_path: Path):
     assert items[0]["category"] == "general"
     assert items[0]["tags"] == []
     assert items[0]["template"] is False
+    assert items[0]["template_parameter_count"] == 0
     assert items[0]["validation_status"] == "valid"
     assert items[0]["validation_errors"] == []
     assert items[0]["source_path"].endswith("alpha.yaml")
@@ -1207,6 +1224,7 @@ def test_list_workflows_broken_spec_still_listed(monkeypatch, tmp_path: Path):
     assert broken["category"] == "general"
     assert broken["tags"] == []
     assert broken["template"] is False
+    assert broken["template_parameter_count"] == 0
     assert broken["validation_status"] == "invalid"
     assert broken["validation_errors"]
     assert broken["source_path"].endswith("broken.yaml")
@@ -1240,6 +1258,7 @@ def test_list_workflows_endpoint_returns_library_metadata(monkeypatch, tmp_path:
             "category": "rag",
             "tags": ["retrieval", "example"],
             "template": False,
+            "template_parameter_count": 0,
             "validation_status": "valid",
             "validation_errors": [],
             "source_path": (specs_root / "searchable.yaml").as_posix(),
@@ -1333,7 +1352,18 @@ def test_list_workflows_counts_approval_and_subgraph_nodes(monkeypatch, tmp_path
 def _template_spec(name: str = "Template") -> str:
     return _minimal_spec(name, "Copy me", "node_t").replace(
         "description: Copy me\n",
-        "description: Copy me\ncategory: template\ntags:\n  - starter\ntemplate: true\n",
+        (
+            "description: Copy me\n"
+            "category: template\n"
+            "tags:\n"
+            "  - starter\n"
+            "template: true\n"
+            "template_parameters:\n"
+            "  - key: user_input\n"
+            "    description: Primary user task.\n"
+            "    state_key: user_input\n"
+            "    example: Say hello.\n"
+        ),
     )
 
 
@@ -1349,6 +1379,7 @@ def test_list_workflows_endpoint_returns_template_flag(monkeypatch, tmp_path: Pa
     body = resp.json()
     assert body[0]["id"] == "starter"
     assert body[0]["template"] is True
+    assert body[0]["template_parameter_count"] == 1
 
 
 def test_copy_template_writes_new_workflow_and_audit(monkeypatch, tmp_path: Path):
@@ -1382,9 +1413,12 @@ def test_copy_template_writes_new_workflow_and_audit(monkeypatch, tmp_path: Path
     assert body["spec"]["category"] == "general"
     assert body["spec"]["tags"] == ["copied"]
     assert body["spec"]["template"] is False
+    assert body["spec"]["template_parameters"] == []
     written = specs_root / "copied_workflow.yaml"
     assert written.exists()
-    assert "template: false" in written.read_text(encoding="utf-8")
+    written_text = written.read_text(encoding="utf-8")
+    assert "template: false" in written_text
+    assert "template_parameters: []" in written_text
     audit = json.loads((Path(body["audit_path"]) / "audit.json").read_text(encoding="utf-8"))
     assert audit["action"] == "template_copy"
     assert audit["source_template"] == "starter"

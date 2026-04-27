@@ -1,7 +1,7 @@
-# Local AI Workflow Platform - M5.13
+# Local AI Workflow Platform - M5.15
 
 A local-first platform to author, run, visualize, and iterate on AI workflows.
-M5.13 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, a searchable category-grouped workflow library selector with validation health signals, and YAML-native reusable workflow templates with convention-based placeholders:
+M5.15 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, a searchable category-grouped workflow library selector with validation health signals, and YAML-native reusable workflow templates with read-only parameter metadata and copy ergonomics:
 
 ## Vision
 
@@ -73,7 +73,7 @@ npm install
 cd ..
 ```
 
-## Verify M5.13 End-to-End
+## Verify M5.15 End-to-End
 
 From repo root (Windows commands shown):
 
@@ -227,8 +227,8 @@ npm run dev
 Open `http://127.0.0.1:5173`.
 
 Expected behavior:
-- workflow selector populates dynamically from `GET /api/workflows`; any `.yaml` file added to `workflows/` appears without touching frontend code; workflows are grouped by `category`, searchable by metadata, template status, and validation errors, and summarized with valid/invalid counts plus selected-workflow graph facts
-- template workflows are marked in the selector and health line; selecting `simple_llm_template` shows a human-confirmed Copy template form in Inspect with a reminder that prompt placeholders are copied unchanged
+- workflow selector populates dynamically from `GET /api/workflows`; any `.yaml` file added to `workflows/` appears without touching frontend code; workflows are grouped by `category`, searchable by metadata, template status, parameter count, and validation errors, and summarized with valid/invalid counts plus selected-workflow graph facts
+- template workflows are marked in the selector and health line; selecting `simple_llm_template` shows a human-confirmed Copy template form in Inspect with expected inputs, local id validation, duplicate-id feedback, and a reminder that prompt placeholders are copied unchanged
 - graph renders for selected workflow
 - selecting a graph node opens source metadata in the inspector
 - selecting a subgraph node can open the referenced child graph without changing the parent workflow selector
@@ -282,13 +282,13 @@ Expected behavior:
 - Canonical editable specs live in [workflows](workflows).
 - Specs are parsed by [backend/graphspec](backend/graphspec), validated as `GraphSpec`, and adapted to the existing runtime `GraphMetadata`.
 - CLI, eval, replay, and API loading use YAML specs only.
-- `/api/workflows` returns `[{id, name, description, category, tags, template, validation_status, validation_errors, source_path, facts}]` for every `.yaml` file in `workflows/`; the frontend selector is fully API-driven, searchable, grouped by category, and shows validation health.
-- `POST /api/workflows/{workflow}/copy-template` copies a valid `template: true` workflow into a new canonical YAML spec after explicit confirmation. The new spec validates through `GraphSpec`, is written with `template: false`, preserves prompt/state placeholders such as `{user_input}` unchanged, and records `runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json`.
+- `/api/workflows` returns `[{id, name, description, category, tags, template, template_parameter_count, validation_status, validation_errors, source_path, facts}]` for every `.yaml` file in `workflows/`; the frontend selector is fully API-driven, searchable, grouped by category, and shows validation health.
+- `POST /api/workflows/{workflow}/copy-template` copies a valid `template: true` workflow into a new canonical YAML spec after explicit confirmation. The UI blocks invalid or already-known target ids before submit; the backend remains the write authority. The new spec validates through `GraphSpec`, is written with `template: false`, clears `template_parameters`, preserves prompt/state placeholders such as `{user_input}` unchanged, and records `runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json`.
 - `/api/graph/{workflow}` returns topology plus full node metadata so the frontend can show both graph shape and node configuration.
 - `/api/spec/{workflow}` returns raw YAML plus validated `GraphSpec` JSON.
 - `/api/approvals?status=pending|decided|all` returns approval artifacts discovered under structured workflow run directories, with decision metadata when present.
 - YAML is the human/LLM editing format. Pydantic `GraphSpec` is the trusted contract.
-- Workflow library conventions, recommended categories, template placeholder conventions, and deferred subdirectory guidance are documented in [docs/workflow_library.md](docs/workflow_library.md).
+- Workflow library conventions, recommended categories, template placeholder/parameter conventions, and deferred subdirectory guidance are documented in [docs/workflow_library.md](docs/workflow_library.md).
 
 ## Workbench Inspection And Proposal Review
 
@@ -431,12 +431,12 @@ runs/spec_audit/<workflow>/<timestamp>/original.yaml
 runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json
 ```
 
-## M5.13 Limits (by design)
+## M5.15 Limits (by design)
 
 - Seven reference workflows plus one copyable starter template; the selector is dynamic so new `.yaml` files appear automatically and are grouped by YAML `category`
 - Workflow specs remain flat under `workflows/*.yaml`; subdirectories and path-like workflow ids are deferred until category/tag navigation is insufficient
 - Workflow library health is static YAML validation plus graph facts only; eval fixture readiness, baseline freshness, and latest run history are deferred
-- Templates are normal executable YAML workflows marked with `template: true`; copy preserves placeholders unchanged, and parameter substitution plus template-specific input schemas are deferred
+- Templates are normal executable YAML workflows marked with `template: true`; `template_parameters` are read-only guidance, copy clears them, local validation only improves ergonomics, and parameter substitution plus runtime input enforcement are deferred
 - Two direct providers only (`openrouter`, `openai`)
 - YAML workflow specs are the editable source of truth; legacy Python workflow modules are no longer a runtime fallback
 - Mutation proposals and proposal evals are read-only until a human explicitly applies a valid proposal

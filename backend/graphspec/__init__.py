@@ -15,7 +15,7 @@ from .loader import (
 )
 from backend.builder.nodes import ApprovalNodeConfig, SubgraphNodeConfig
 
-from .models import BudgetSpec, EdgeSpec, GraphSpec, LoopSpec
+from .models import BudgetSpec, EdgeSpec, GraphSpec, LoopSpec, TemplateParameterSpec
 from .apply import AppliedProposal, apply_graph_spec_proposal
 from .mutation import MutationProposal, propose_mutation
 from .optimization import OptimizationCandidate, OptimizationReport, optimize_proposals
@@ -37,6 +37,7 @@ __all__ = [
     "EdgeSpec",
     "GraphSpec",
     "LoopSpec",
+    "TemplateParameterSpec",
     "MutationProposal",
     "OptimizationCandidate",
     "OptimizationReport",

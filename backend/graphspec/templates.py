@@ -59,6 +59,7 @@ def copy_workflow_template(
     if tags is not None:
         payload["tags"] = tags
     payload["template"] = False
+    payload["template_parameters"] = []
 
     copied_spec = GraphSpec.model_validate(payload)
     yaml_text = yaml.safe_dump(payload, sort_keys=False, allow_unicode=False)

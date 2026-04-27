@@ -5,6 +5,7 @@ export interface WorkflowSummary {
   category: string;
   tags: string[];
   template: boolean;
+  template_parameter_count: number;
   validation_status: "valid" | "invalid";
   validation_errors: string[];
   source_path: string;
@@ -15,6 +16,13 @@ export interface WorkflowSummary {
     approval_node_count: number;
     subgraph_node_count: number;
   };
+}
+
+export interface TemplateParameter {
+  key: string;
+  description: string;
+  state_key?: string | null;
+  example?: string | null;
 }
 
 export type NodeKind = "llm" | "tester" | "gate" | "retriever" | "router" | "approval" | "subgraph";
@@ -60,6 +68,7 @@ export interface WorkflowSpecResponse {
     category: string;
     tags: string[];
     template: boolean;
+    template_parameters: TemplateParameter[];
     budget: {
       cost_usd: number;
       latency_ms: number;

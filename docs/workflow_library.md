@@ -61,6 +61,11 @@ A reusable workflow template is still a normal YAML `GraphSpec` file under `work
 
 ```yaml
 template: true
+template_parameters:
+  - key: user_input
+    description: Primary task text supplied when the copied workflow runs.
+    state_key: user_input
+    example: Summarize this note in three bullets.
 category: template
 tags:
   - starter
@@ -77,7 +82,9 @@ The copy flow is explicit and audited:
 3. Provide a lowercase snake_case `new_workflow_id` and optional metadata overrides.
 4. Confirm the write.
 
-The API endpoint is `POST /api/workflows/{workflow}/copy-template`. It accepts `new_workflow_id`, optional `name`, `description`, `category`, `tags`, and `accepted_by`. The source must validate and have `template: true`. The new file is written to `workflows/<new_workflow_id>.yaml` with copied nodes, edges, loops, budget, and prompts, but with `template: false`. An audit entry is written under `runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json` with the source template, target path, reviewer, and SHA256 of the written YAML.
+The UI validates `new_workflow_id` locally before submit. It must be lowercase snake_case, start with a letter, and not already exist in the workflow list. The backend remains the final write authority and still rejects invalid or existing ids.
+
+The API endpoint is `POST /api/workflows/{workflow}/copy-template`. It accepts `new_workflow_id`, optional `name`, `description`, `category`, `tags`, and `accepted_by`. The source must validate and have `template: true`. The new file is written to `workflows/<new_workflow_id>.yaml` with copied nodes, edges, loops, budget, and prompts, but with `template: false`. An audit entry is written under `runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json` with the source template, target path, reviewer, and SHA256 of the written YAML. After copy, the UI selects the new workflow and shows source/audit paths so contributors can continue through normal source review or proposal flow.
 
 ## Template Parameterization
 
@@ -93,7 +100,17 @@ Placeholders should be explicit, human-readable, and tied to normal workflow sta
 
 Do not introduce `${...}`, Jinja syntax, environment-variable placeholders, secret placeholders, preprocessing, or template-specific substitution rules. Copying a template preserves prompts and placeholders unchanged. After copy, the new `template: false` workflow should be customized through the same source inspection, YAML proposal, diff, eval, and apply flow as any other canonical workflow.
 
-Typed parameter metadata, required input schemas, and wizard-style substitution are deferred until copied-template usage shows that conventions are not enough.
+Templates can also declare documentation-only parameter metadata:
+
+```yaml
+template_parameters:
+  - key: user_input
+    description: Primary task text supplied when the copied workflow runs.
+    state_key: user_input
+    example: Summarize this note in three bullets.
+```
+
+This metadata is valid only on `template: true` workflows. It helps the UI explain expected inputs before copy, but it must not substitute text, rewrite prompts, enforce runtime input schemas, read secrets, or introduce a preprocessing step. When a template is copied, the new workflow is written with `template: false` and `template_parameters: []`.
 
 ## Adding A Workflow
 

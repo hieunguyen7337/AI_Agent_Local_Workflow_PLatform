@@ -28,6 +28,7 @@ import type {
 } from "../types";
 
 type InspectorTab = "node" | "source" | "validation" | "propose" | "rollback";
+const WORKFLOW_ID_RE = /^[a-z][a-z0-9_]*$/;
 
 function formatValue(value: unknown): string {
   if (value == null || value === "") return "-";
@@ -160,6 +161,7 @@ function syntheticNode(nodeId: string, topology: Topology): GraphNode | undefine
 export default function SpecInspector({
   topology,
   spec,
+  workflowIds = [],
   selectedNodeId,
   tab,
   onTabChange,
@@ -170,11 +172,12 @@ export default function SpecInspector({
 }: {
   topology?: Topology;
   spec?: WorkflowSpecResponse;
+  workflowIds?: string[];
   selectedNodeId?: string;
   tab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
   onApplied?: () => void | Promise<void>;
-  onTemplateCopied?: (workflow: string) => void | Promise<void>;
+  onTemplateCopied?: (result: CopyTemplateResponse) => void | Promise<void>;
   availableTabs?: InspectorTab[];
   title?: string;
 }) {
@@ -223,6 +226,18 @@ export default function SpecInspector({
   const [copyResult, setCopyResult] = useState<CopyTemplateResponse | undefined>(undefined);
   const [copyError, setCopyError] = useState<string | undefined>(undefined);
   const [isCopyingTemplate, setIsCopyingTemplate] = useState(false);
+  const copyWorkflowIdTrimmed = copyWorkflowId.trim();
+  const copyWorkflowIdExists = copyWorkflowIdTrimmed !== "" && workflowIds.includes(copyWorkflowIdTrimmed);
+  const copyWorkflowIdError =
+    copyWorkflowIdTrimmed === ""
+      ? undefined
+      : !WORKFLOW_ID_RE.test(copyWorkflowIdTrimmed)
+        ? "Workflow id must be lowercase snake_case and start with a letter."
+        : copyWorkflowIdExists
+          ? "Workflow id already exists."
+          : undefined;
+  const canCopyTemplate =
+    Boolean(spec) && copyWorkflowIdTrimmed !== "" && !copyWorkflowIdError && copyConfirmed && !isCopyingTemplate;
 
   const selectedSubgraphWorkflow =
     selectedNode?.kind === "subgraph" && typeof selectedNode.metadata?.workflow === "string"
@@ -423,7 +438,7 @@ export default function SpecInspector({
   }
 
   async function submitTemplateCopy() {
-    if (!spec || !copyConfirmed || !copyWorkflowId.trim() || isCopyingTemplate) return;
+    if (!spec || !canCopyTemplate) return;
     setIsCopyingTemplate(true);
     setCopyError(undefined);
     setCopyResult(undefined);
@@ -433,7 +448,7 @@ export default function SpecInspector({
         .map((item) => item.trim())
         .filter(Boolean);
       const result = await copyWorkflowTemplate(spec.workflow, {
-        new_workflow_id: copyWorkflowId.trim(),
+        new_workflow_id: copyWorkflowIdTrimmed,
         name: copyName.trim() || undefined,
         description: copyDescription.trim() || undefined,
         category: copyCategory.trim() || undefined,
@@ -442,7 +457,7 @@ export default function SpecInspector({
       });
       setCopyResult(result);
       setCopyConfirmed(false);
-      await onTemplateCopied?.(result.workflow);
+      await onTemplateCopied?.(result);
     } catch (error) {
       setCopyError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -492,15 +507,39 @@ export default function SpecInspector({
                     Prompt placeholders such as {"{user_input}"} are copied unchanged; customize them after copy through the normal source or proposal flow.
                   </div>
                 </div>
+                {spec.spec.template_parameters.length > 0 && (
+                  <div className="space-y-2 rounded border border-violet-200 bg-white p-2">
+                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Expected inputs</div>
+                    <div className="space-y-2">
+                      {spec.spec.template_parameters.map((parameter) => (
+                        <div key={parameter.key} className="text-xs text-slate-800">
+                          <div className="font-mono font-medium text-violet-950">{parameter.key}</div>
+                          <div className="text-slate-700">{parameter.description}</div>
+                          {(parameter.state_key || parameter.example) && (
+                            <div className="mt-1 font-mono text-[11px] text-slate-500">
+                              {parameter.state_key ? `state: ${parameter.state_key}` : ""}
+                              {parameter.state_key && parameter.example ? " | " : ""}
+                              {parameter.example ? `example: ${parameter.example}` : ""}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <label className="space-y-1">
                     <div className="text-[11px] uppercase tracking-wide text-violet-700">New workflow id</div>
                     <input
-                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      className={[
+                        "w-full rounded border bg-white p-1.5 text-xs",
+                        copyWorkflowIdError ? "border-red-300" : "border-violet-200",
+                      ].join(" ")}
                       value={copyWorkflowId}
                       onChange={(event) => setCopyWorkflowId(event.target.value)}
                       placeholder="my_new_workflow"
                     />
+                    {copyWorkflowIdError && <div className="text-xs text-red-700">{copyWorkflowIdError}</div>}
                   </label>
                   <label className="space-y-1">
                     <div className="text-[11px] uppercase tracking-wide text-violet-700">Accepted by</div>
@@ -561,7 +600,7 @@ export default function SpecInspector({
                 <button
                   type="button"
                   className="w-fit rounded border border-violet-900 bg-violet-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
-                  disabled={!copyConfirmed || !copyWorkflowId.trim() || isCopyingTemplate}
+                  disabled={!canCopyTemplate}
                   onClick={submitTemplateCopy}
                 >
                   {isCopyingTemplate ? "Copying..." : "Copy template"}
@@ -574,6 +613,9 @@ export default function SpecInspector({
                 {copyResult && (
                   <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
                     <div className="font-medium">Copied to {copyResult.workflow}</div>
+                    <div>
+                      This is now a normal template: false workflow. Customize prompts and metadata through source review or the proposal flow.
+                    </div>
                     <Field label="Source Path" value={copyResult.source_path} mono />
                     <Field label="Audit Path" value={copyResult.audit_path} mono />
                   </div>

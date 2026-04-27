@@ -40,8 +40,12 @@ npm run dev
 - Open the raw YAML source and confirm it matches the selected workflow.
 - Confirm validation status is visible and understandable.
 - Select `simple_llm_template`, confirm the Copy template form appears in Inspect, and confirm the copy button remains disabled until a new workflow id and confirmation are provided.
+- Confirm the Copy template form shows expected inputs from read-only `template_parameters`.
 - Confirm the Copy template form explains that prompt placeholders such as `{user_input}` are copied unchanged and customized afterward through normal source/proposal review.
-- Copy the template to a new lowercase snake_case id, then confirm the new workflow appears, is selected, validates, is not marked as a template, and has an audit entry under `runs/spec_audit/<new_workflow_id>/`.
+- Enter an invalid workflow id such as `Bad-Id` and confirm the form shows a validation message and keeps Copy disabled.
+- Enter an existing workflow id such as `coder_tester` and confirm the form shows duplicate-id feedback and keeps Copy disabled.
+- Copy the template to a new lowercase snake_case id, then confirm the new workflow appears, is selected, validates, is not marked as a template, has no active template parameters, and has an audit entry under `runs/spec_audit/<new_workflow_id>/`.
+- After copying, confirm the workbench shows source and audit paths plus guidance that the copy is now a normal workflow.
 - For `rag_subgraph_wrapper`, select the subgraph node and open the child graph/source view without changing the parent workflow selector.
 
 ## Run

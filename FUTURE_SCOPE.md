@@ -33,6 +33,8 @@ Entries should be pruned or moved when they graduate into implemented milestones
 - **Workflow library health signals** - workflow summaries include validation status, validation errors, source path, and static graph facts so invalid YAML remains discoverable and repairable.
 - **Reusable workflow templates** - YAML workflows can opt into template status with `template: true`; templates remain valid executable `GraphSpec` files, appear in `/api/workflows`, and can be copied through a human-confirmed UI/API flow that writes a new canonical workflow YAML with `template: false` plus a local audit record.
 - **Template parameterization conventions** - templates may use normal runtime prompt/state placeholders such as `{user_input}`; copy preserves placeholders unchanged, and customization remains part of the normal YAML source/proposal/apply loop.
+- **Schema-backed template parameter metadata** - templates can declare documentation-only `template_parameters` for expected inputs; the API/UI surface them read-only, and copied workflows clear them when becoming normal `template: false` specs.
+- **Template copy ergonomics** - the copy UI validates target ids locally, warns on duplicate workflow ids before submit, keeps backend rejection as the write authority, and shows post-copy source/audit guidance for the new normal workflow.
 
 ## Product usability
 
@@ -43,13 +45,13 @@ Entries should be pruned or moved when they graduate into implemented milestones
 
 ## Next product milestone
 
-- **Schema-backed template parameter metadata** - consider YAML-native metadata for documenting expected template inputs only after convention-only templates prove insufficient. Do not add substitution, a preprocessor, a manifest, or a second authoring format without a concrete copied-template workflow that needs it.
+- **Workflow library quality signals beyond validation** - surface eval fixture presence and baseline freshness for workflows without adding run history or hosted state. Keep discovery YAML-rooted under `WORKFLOW_SPECS_ROOT`, and avoid mixing latest runtime status into static library metadata.
 
 ## Workflow capabilities
 
 - **Inline subgraph editing** - child graph inspection is read-only; editing still happens through the YAML proposal/apply loop.
-- **Library quality signals beyond validation** - eval fixture presence, baseline freshness, and latest run status are intentionally deferred until the product needs operational library quality rather than static YAML health.
-- **Template parameter execution** - typed template variables, wizard-driven substitution, required input schemas, and placeholder replacement are deferred until the project has enough copied-template usage to justify moving beyond conventions.
+- **Latest run status in library discovery** - latest run status remains deferred because it mixes runtime history with static workflow library metadata.
+- **Template parameter execution** - wizard-driven substitution, required runtime input schemas, and placeholder replacement are deferred until the project has enough copied-template usage to justify moving beyond read-only metadata.
 
 ## Technical debt and compatibility
 

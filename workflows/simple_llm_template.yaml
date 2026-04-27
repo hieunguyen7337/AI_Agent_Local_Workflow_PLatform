@@ -8,6 +8,11 @@ tags:
   - copyable
   - parameterized
 template: true
+template_parameters:
+  - key: user_input
+    description: Primary task text supplied when the copied workflow runs.
+    state_key: user_input
+    example: Summarize this note in three bullets.
 budget:
   cost_usd: 0.25
   latency_ms: 120000

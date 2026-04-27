@@ -8,7 +8,7 @@ import SpecInspector from "./components/SpecInspector";
 import RunStarter from "./components/RunStarter";
 import { fetchNodeMetrics, fetchTopology, fetchWorkflowSpec, fetchWorkflows } from "./api/client";
 import { useLiveUpdates } from "./live/useLiveUpdates";
-import type { WorkflowSummary } from "./types";
+import type { CopyTemplateResponse, WorkflowSummary } from "./types";
 
 type InspectorTab = "node" | "source" | "validation" | "propose" | "rollback";
 type WorkbenchTab = "inspect" | "run" | "improve" | "recover";
@@ -37,6 +37,7 @@ function workflowMatchesSearch(workflow: WorkflowSummary, search: string) {
     workflow.description,
     workflow.category,
     workflow.template ? "template" : "",
+    workflow.template_parameter_count > 0 ? `${workflow.template_parameter_count} parameters expected inputs` : "",
     workflow.validation_status,
     workflow.source_path,
     ...workflow.tags,
@@ -62,6 +63,7 @@ function workflowOptionTitle(workflow: WorkflowSummary) {
     workflow.description,
     workflow.source_path,
     workflow.template ? "template" : "",
+    workflow.template_parameter_count > 0 ? `${workflow.template_parameter_count} parameters` : "",
     workflow.tags.join(", "),
     ...workflow.validation_errors,
   ].filter(Boolean).join(" | ");
@@ -81,6 +83,9 @@ function workflowFactSummary(workflow: WorkflowSummary | undefined) {
   if (workflow.facts.subgraph_node_count > 0) {
     parts.push(`${workflow.facts.subgraph_node_count} subgraph`);
   }
+  if (workflow.template_parameter_count > 0) {
+    parts.push(`${workflow.template_parameter_count} parameters`);
+  }
   return parts.join(" · ");
 }
 
@@ -91,6 +96,7 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState<string | undefined>(undefined);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("node");
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("inspect");
+  const [templateCopyNotice, setTemplateCopyNotice] = useState<CopyTemplateResponse | undefined>(undefined);
   useLiveUpdates(workflow, selectedRun);
 
   const workflows = useQuery({
@@ -241,6 +247,14 @@ export default function App() {
           <div className="px-3 py-2">
             <div className="text-xs uppercase text-slate-500">Workflow workbench</div>
             <div className="text-sm font-semibold text-slate-800">{workflow}</div>
+            {templateCopyNotice?.workflow === workflow && (
+              <div className="mt-2 space-y-1 rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-900">
+                <div className="font-medium">Copied template to {templateCopyNotice.workflow}</div>
+                <div>Normal template: false workflow. Customize it through source review or the proposal flow.</div>
+                <div className="font-mono text-[11px] break-all">source: {templateCopyNotice.source_path}</div>
+                <div className="font-mono text-[11px] break-all">audit: {templateCopyNotice.audit_path}</div>
+              </div>
+            )}
           </div>
           <div className="flex border-t text-xs">
             {WORKBENCH_TABS.map((item) => (
@@ -272,15 +286,17 @@ export default function App() {
               <SpecInspector
                 topology={topo.data}
                 spec={spec.data}
+                workflowIds={(workflows.data ?? []).map((item) => item.id)}
                 selectedNodeId={selectedNode}
                 tab={["node", "source", "validation"].includes(inspectorTab) ? inspectorTab : "node"}
                 onTabChange={setInspectorTab}
                 availableTabs={["node", "source", "validation"]}
                 title="Inspect source"
-                onTemplateCopied={async (newWorkflowId) => {
+                onTemplateCopied={async (result) => {
                   await workflows.refetch();
                   setWorkflowSearch("");
-                  setWorkflow(newWorkflowId);
+                  setTemplateCopyNotice(result);
+                  setWorkflow(result.workflow);
                 }}
               />
             </div>

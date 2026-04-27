@@ -10,7 +10,7 @@ The source of truth is YAML in `workflows/*.yaml`. LLMs should be able to read a
 
 Do not introduce JSON, Python modules, decorators, or custom DSLs as alternate workflow authoring formats.
 
-## Current Baseline (M5.14)
+## Current Baseline (M5.15)
 
 - YAML `GraphSpec` is canonical.
 - Python workflow fallback has been removed.
@@ -25,6 +25,8 @@ Do not introduce JSON, Python modules, decorators, or custom DSLs as alternate w
 - `GET /api/workflows` scans `workflows/*.yaml` dynamically and returns metadata, validation health, source paths, and static graph facts; the frontend selector is API-driven, searchable, grouped by category, and shows compact library health counts.
 - Reusable workflow templates are normal YAML `GraphSpec` files marked with `template: true`; the UI/API can copy them into new canonical workflow YAML files with `template: false` and a local audit record.
 - Template parameterization is convention-first: templates may use normal prompt/state placeholders such as `{user_input}`, copy preserves them unchanged, and customization happens through source review or the proposal/apply loop.
+- Template parameter metadata is schema-backed and documentation-only: `template_parameters` describe expected inputs for template UI review, and copied workflows clear them when becoming normal specs.
+- Template copy ergonomics include local target id validation, duplicate-id feedback, and post-copy source/audit guidance; backend validation remains authoritative.
 
 Read `FUTURE_SCOPE.md` for the current next milestone and deferred work.
 
@@ -122,11 +124,17 @@ Run eval:
 
 ## Current Next Step
 
-Check `FUTURE_SCOPE.md`. The next milestone is **schema-backed template parameter metadata**: considering YAML-native metadata for documenting expected template inputs only if convention-only placeholders prove insufficient. Key files to read first:
+Check `FUTURE_SCOPE.md`. The next milestone is **workflow library quality signals beyond validation**: surfacing eval fixture presence and baseline freshness without adding run history or hosted state. Key files to read first:
 
-- `backend/graphspec/loader.py` - `list_workflow_ids`, `load_graph_spec_source`
-- `backend/graphspec/templates.py` - audited template copy behavior
-- `backend/server/routes.py` - `GET /api/workflows`, `POST /api/workflows/{workflow}/copy-template`
-- `frontend/src/App.tsx` and `frontend/src/components/SpecInspector.tsx` - searchable selector and template copy UI
+- `backend/server/routes.py` - `GET /api/workflows`
+- `backend/evals/` - eval fixture and baseline conventions
+- `evals/` - fixture directories and baseline files
+- `frontend/src/App.tsx` - workflow selector and library summary
 - `frontend/src/types.ts` - `WorkflowSummary`
-- `docs/workflow_library.md` - accepted library/template conventions and placeholder rules
+- `docs/workflow_library.md` - accepted library/template conventions and deferred run history
+
+Implementation guardrails:
+
+- Keep quality signals static and filesystem-derived.
+- Do not add latest run status, hosted state, cloud persistence, or auth.
+- Keep discovery rooted in `WORKFLOW_SPECS_ROOT`; do not add a separate manifest.

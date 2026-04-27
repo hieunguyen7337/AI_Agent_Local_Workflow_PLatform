@@ -39,6 +39,14 @@ def test_graph_spec_accepts_library_metadata():
             "category": "rag",
             "tags": ["retrieval", "example"],
             "template": True,
+            "template_parameters": [
+                {
+                    "key": "user_input",
+                    "description": "Primary user task.",
+                    "state_key": "user_input",
+                    "example": "Summarize this.",
+                }
+            ],
             "budget": {"cost_usd": 0.1, "latency_ms": 1000},
             "entry": "a",
             "nodes": [
@@ -57,6 +65,8 @@ def test_graph_spec_accepts_library_metadata():
     assert spec.category == "rag"
     assert spec.tags == ["retrieval", "example"]
     assert spec.template is True
+    assert len(spec.template_parameters) == 1
+    assert spec.template_parameters[0].key == "user_input"
 
 
 def test_graph_spec_defaults_library_metadata():
@@ -81,6 +91,62 @@ def test_graph_spec_defaults_library_metadata():
     assert spec.category == "general"
     assert spec.tags == []
     assert spec.template is False
+    assert spec.template_parameters == []
+
+
+def test_graph_spec_rejects_bad_template_parameters():
+    base = {
+        "name": "bad_template",
+        "template": True,
+        "budget": {"cost_usd": 0.1, "latency_ms": 1000},
+        "entry": "a",
+        "nodes": [
+            {
+                "id": "a",
+                "kind": "llm",
+                "model": "m",
+                "system_prompt": "s",
+                "user_prompt_template": "{user_input}",
+                "output_state_key": "x",
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError, match="lowercase snake_case"):
+        GraphSpec.model_validate(
+            {
+                **base,
+                "template_parameters": [{"key": "Bad-Key", "description": "Nope."}],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="duplicate template parameter keys"):
+        GraphSpec.model_validate(
+            {
+                **base,
+                "template_parameters": [
+                    {"key": "user_input", "description": "One."},
+                    {"key": "user_input", "description": "Two."},
+                ],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        GraphSpec.model_validate(
+            {
+                **base,
+                "template_parameters": [{"key": "user_input", "description": "Task.", "required": True}],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="template_parameters require template: true"):
+        GraphSpec.model_validate(
+            {
+                **base,
+                "template": False,
+                "template_parameters": [{"key": "user_input", "description": "Task."}],
+            }
+        )
 
 
 def test_graph_spec_rejects_unknown_library_fields():

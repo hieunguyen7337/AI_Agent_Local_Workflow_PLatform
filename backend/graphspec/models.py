@@ -1,9 +1,10 @@
 """Pydantic models for the declarative workflow source of truth."""
 from __future__ import annotations
 
+import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.builder.api import END
 from backend.builder.nodes import (
@@ -15,6 +16,8 @@ from backend.builder.nodes import (
     SubgraphNodeConfig,
     TesterNodeConfig,
 )
+
+_SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 GraphNodeSpec = Annotated[
     LLMNodeConfig
@@ -50,6 +53,22 @@ class LoopSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+class TemplateParameterSpec(BaseModel):
+    key: str
+    description: str
+    state_key: str | None = None
+    example: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("key")
+    @classmethod
+    def _validate_key(cls, value: str) -> str:
+        if not _SNAKE_CASE_RE.fullmatch(value):
+            raise ValueError("template parameter key must be lowercase snake_case and start with a letter")
+        return value
+
+
 class GraphSpec(BaseModel):
     schema_version: Literal["workflow.graph/v1"] = "workflow.graph/v1"
     name: str
@@ -57,6 +76,7 @@ class GraphSpec(BaseModel):
     category: str = "general"
     tags: list[str] = Field(default_factory=list)
     template: bool = False
+    template_parameters: list[TemplateParameterSpec] = Field(default_factory=list)
     budget: BudgetSpec
     entry: str
     nodes: list[GraphNodeSpec]
@@ -67,6 +87,15 @@ class GraphSpec(BaseModel):
 
     @model_validator(mode="after")
     def _validate_graph(self) -> "GraphSpec":
+        parameter_keys = [parameter.key for parameter in self.template_parameters]
+        duplicate_parameter_keys = sorted(
+            {parameter_key for parameter_key in parameter_keys if parameter_keys.count(parameter_key) > 1}
+        )
+        if duplicate_parameter_keys:
+            raise ValueError(f"duplicate template parameter keys: {', '.join(duplicate_parameter_keys)}")
+        if self.template_parameters and not self.template:
+            raise ValueError("template_parameters require template: true")
+
         node_ids: list[str] = [node.id for node in self.nodes]
         duplicates = sorted({node_id for node_id in node_ids if node_ids.count(node_id) > 1})
         if duplicates:
