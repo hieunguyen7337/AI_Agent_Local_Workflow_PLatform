@@ -33,6 +33,10 @@ npm run dev
 - Select each workflow and verify the graph renders.
 - Confirm the workflow selector groups workflows by category and the search box filters by id, name, description, category, and tags.
 - Confirm the library summary shows total, valid, and invalid counts, and that the selected workflow shows node/edge/loop/approval/subgraph facts.
+- Confirm the library summary shows fixture-ready and fresh-baseline counts.
+- Confirm selected workflow health includes fixture count/status and baseline status.
+- Search for `fixtures`, `baseline`, `fresh`, `stale`, `missing`, and a fixture/baseline path fragment; confirm matching workflows remain discoverable.
+- With temporary eval files, confirm fixture-present/missing/invalid and baseline-fresh/stale/missing states render without breaking selector grouping.
 - Confirm template workflows are marked as `(template)` in the selector, can be found by searching `template`, and show `template` in the selected-workflow health/facts line.
 - With a temporary invalid workflow spec, confirm it remains visible as invalid and can be found by searching `invalid` or part of the validation error text.
 - Click every node kind used by the reference workflows: `llm`, `tester`, `retriever`, `gate`, `router`, `approval`, `subgraph`, `START`, `END`.

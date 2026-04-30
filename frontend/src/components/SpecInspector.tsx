@@ -75,6 +75,18 @@ function nodeFields(node: GraphNode): Array<{ label: string; value: unknown; mon
       { label: "User Prompt Template", value: m.user_prompt_template, pre: true },
     ];
   }
+  if (node.kind === "embedding") {
+    return [
+      ...base,
+      { label: "Provider", value: m.provider },
+      { label: "Model", value: m.model, mono: true },
+      { label: "Output State Key", value: m.output_state_key, mono: true },
+      { label: "Dimensions", value: m.dimensions },
+      { label: "Max Retries", value: m.max_retries },
+      { label: "Input Template", value: m.input_template, pre: true },
+      { label: "Image Inputs", value: m.image_inputs, mono: true, pre: true },
+    ];
+  }
   if (node.kind === "router") {
     return [
       ...base,
@@ -115,6 +127,16 @@ function nodeFields(node: GraphNode): Array<{ label: string; value: unknown; mon
       { label: "Corpus Path", value: m.corpus_path, mono: true },
       { label: "Query State Key", value: m.query_state_key, mono: true },
       { label: "Output State Key", value: m.output_state_key, mono: true },
+      { label: "Top K", value: m.top_k },
+    ];
+  }
+  if (node.kind === "vector_retriever") {
+    return [
+      ...base,
+      { label: "Index Path", value: m.index_path, mono: true },
+      { label: "Query Embedding State Key", value: m.query_embedding_state_key, mono: true },
+      { label: "Output State Key", value: m.output_state_key, mono: true },
+      { label: "ID Output State Key", value: m.id_output_state_key, mono: true },
       { label: "Top K", value: m.top_k },
     ];
   }

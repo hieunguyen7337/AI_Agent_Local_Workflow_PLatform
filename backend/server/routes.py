@@ -19,6 +19,7 @@ from backend.approvals import (
 )
 from backend.builder.api import GraphMetadata
 from backend.builder.nodes import ApprovalNodeConfig, GateNodeConfig, RouterNodeConfig, SubgraphNodeConfig
+from backend.evals.fixtures import load_fixtures
 from backend.evals.harness import EVALS_ROOT, run_eval_for_metadata
 from backend.graphspec import (
     GraphSpec,
@@ -39,6 +40,12 @@ from backend.graphspec.loader import WORKFLOW_SPECS_ROOT
 from backend.providers.base import ProviderError
 from backend.runtime.artifacts import artifact_paths, iter_run_dirs, resolve_run_dir
 from backend.runtime.executor import run_graph
+from backend.runtime.functions import (
+    DEFAULT_MAX_CONCURRENCY,
+    WorkflowBatchItem,
+    run_workflow_batch,
+    run_workflow_function,
+)
 from backend.server.node_metrics import compute_node_metrics
 
 router = APIRouter()
@@ -81,6 +88,17 @@ class RollbackRestoreRequest(BaseModel):
 class StartRunRequest(BaseModel):
     input: str = Field(min_length=1)
     expected: str | None = None
+
+
+class BatchRunItem(BaseModel):
+    id: str | None = None
+    input_state: dict[str, Any] | str
+    expected: str | None = None
+
+
+class BatchRunRequest(BaseModel):
+    items: list[BatchRunItem] = Field(min_length=1)
+    max_concurrency: int = Field(DEFAULT_MAX_CONCURRENCY, ge=1)
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -189,10 +207,20 @@ def list_workflows() -> list[dict]:
     result = []
     for wid in ids:
         source_path = WORKFLOW_SPECS_ROOT / f"{wid}.yaml"
+        eval_quality = _workflow_eval_quality(
+            workflow=wid,
+            source_path=source_path,
+            evals_root=EVALS_ROOT,
+        )
         try:
             spec, _yaml_text, source_path = load_graph_spec_source(
                 wid,
                 specs_root=WORKFLOW_SPECS_ROOT,
+            )
+            eval_quality = _workflow_eval_quality(
+                workflow=wid,
+                source_path=source_path,
+                evals_root=EVALS_ROOT,
             )
             result.append(
                 {
@@ -207,6 +235,7 @@ def list_workflows() -> list[dict]:
                     "validation_errors": [],
                     "source_path": source_path.as_posix(),
                     "facts": _workflow_facts(spec),
+                    "eval_quality": eval_quality,
                 }
             )
         except Exception as exc:
@@ -223,6 +252,7 @@ def list_workflows() -> list[dict]:
                     "validation_errors": [str(exc)],
                     "source_path": source_path.as_posix(),
                     "facts": _empty_workflow_facts(),
+                    "eval_quality": eval_quality,
                 }
             )
     return result
@@ -279,6 +309,63 @@ def _workflow_facts(spec: GraphSpec) -> dict[str, int]:
         "approval_node_count": sum(isinstance(node, ApprovalNodeConfig) for node in spec.nodes),
         "subgraph_node_count": sum(isinstance(node, SubgraphNodeConfig) for node in spec.nodes),
     }
+
+
+def _workflow_eval_quality(*, workflow: str, source_path: Path, evals_root: Path) -> dict[str, Any]:
+    fixture_path = evals_root / workflow / "fixtures.yaml"
+    baseline_path = evals_root / workflow / "baseline.json"
+    quality: dict[str, Any] = {
+        "fixture_status": "missing",
+        "fixture_path": fixture_path.as_posix(),
+        "fixture_count": 0,
+        "fixture_errors": [],
+        "baseline_status": "not_applicable",
+        "baseline_path": baseline_path.as_posix(),
+        "baseline_updated_at": None,
+        "stale_reasons": [],
+    }
+
+    if not fixture_path.exists():
+        return quality
+
+    try:
+        fixtures = load_fixtures(fixture_path)
+        quality["fixture_status"] = "present"
+        quality["fixture_count"] = len(fixtures)
+    except Exception as exc:
+        quality["fixture_status"] = "invalid"
+        quality["fixture_errors"] = [str(exc)]
+        return quality
+
+    if not baseline_path.exists():
+        quality["baseline_status"] = "missing"
+        return quality
+
+    try:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        if not isinstance(baseline, dict):
+            raise ValueError(f"Expected a JSON object in {baseline_path}, got {type(baseline).__name__}")
+        baseline_workflow = baseline.get("workflow")
+        if baseline_workflow is not None and baseline_workflow != workflow:
+            raise ValueError(
+                f"baseline workflow {baseline_workflow!r} does not match workflow {workflow!r}"
+            )
+    except Exception as exc:
+        quality["baseline_status"] = "invalid"
+        quality["fixture_errors"] = [*quality["fixture_errors"], str(exc)]
+        return quality
+
+    baseline_mtime = baseline_path.stat().st_mtime
+    quality["baseline_updated_at"] = baseline_path.stat().st_mtime_ns
+    stale_reasons: list[str] = []
+    if source_path.exists() and baseline_mtime < source_path.stat().st_mtime:
+        stale_reasons.append("workflow spec is newer than baseline")
+    if baseline_mtime < fixture_path.stat().st_mtime:
+        stale_reasons.append("fixtures are newer than baseline")
+
+    quality["stale_reasons"] = stale_reasons
+    quality["baseline_status"] = "stale" if stale_reasons else "fresh"
+    return quality
 
 
 @router.get("/api/graph/{workflow}")
@@ -576,22 +663,59 @@ def list_runs(limit: int = 50) -> list[dict]:
 
 @router.post("/api/runs")
 def start_run(request: StartRunRequest, workflow: str) -> dict:
-    metadata = load_workflow(workflow)
-    result = run_graph(
-        metadata,
-        user_input=request.input,
-        expected=request.expected,
-        runs_root=RUNS_ROOT,
-    )
+    try:
+        result = run_workflow_function(
+            workflow,
+            request.input,
+            expected=request.expected,
+            runs_root=RUNS_ROOT,
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, f"workflow {workflow!r} not found")
     return {
         "run_id": result.run_id,
-        "graph_name": result.graph_name,
+        "graph_name": result.workflow,
         "status": result.status,
         "cost_usd": result.cost_usd,
         "latency_ms": result.latency_ms,
         "error": result.error,
         **artifact_paths(result.run_dir),
         "final_state": result.final_state,
+    }
+
+
+@router.post("/api/workflows/{workflow}/batch-run")
+def post_workflow_batch_run(workflow: str, request: BatchRunRequest) -> dict:
+    if workflow not in list_workflow_ids(specs_root=WORKFLOW_SPECS_ROOT):
+        raise HTTPException(404, f"workflow {workflow!r} not found")
+    results = run_workflow_batch(
+        workflow,
+        [
+            WorkflowBatchItem(
+                id=item.id,
+                input_state=item.input_state,
+                expected=item.expected,
+            )
+            for item in request.items
+        ],
+        max_concurrency=request.max_concurrency,
+        runs_root=RUNS_ROOT,
+    )
+    return {
+        "workflow": workflow,
+        "results": [
+            {
+                "id": result.id,
+                "status": result.status,
+                "final_state": result.final_state,
+                "run_id": result.run_id,
+                "run_dir": result.run_dir.as_posix() if result.run_dir else None,
+                "error": result.error,
+                "cost_usd": result.cost_usd,
+                "latency_ms": result.latency_ms,
+            }
+            for result in results
+        ],
     }
 
 

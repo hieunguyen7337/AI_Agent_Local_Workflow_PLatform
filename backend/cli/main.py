@@ -10,10 +10,12 @@ import typer
 from dotenv import load_dotenv
 
 from backend.checkpointing.replay import parse_set_arg, replay as replay_run
+from backend.evals.dataset import run_dataset_eval
 from backend.evals.harness import run_eval
 from backend.graphspec import load_workflow_metadata
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
+from backend.runtime.functions import DEFAULT_MAX_CONCURRENCY, run_workflow_function
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -64,17 +66,16 @@ def run(
     ),
 ) -> None:
     """Run a workflow once."""
-    metadata = _load_workflow_metadata(workflow)
     cancellation = CancellationController()
     initial_overrides = None
     if test_code_file is not None:
         initial_overrides = {"_test_code": test_code_file.read_text(encoding="utf-8")}
     with _CancelHandler(cancellation):
-        result = run_graph(
-            metadata,
-            user_input=input,
+        input_state = {"user_input": input, **(initial_overrides or {})}
+        result = run_workflow_function(
+            workflow,
+            input_state,
             expected=expected,
-            initial_state_overrides=initial_overrides,
             cancellation=cancellation,
         )
     typer.echo(
@@ -161,6 +162,12 @@ def eval(
         "--fail-on-regression",
         help="exit non-zero if regression is detected versus baseline",
     ),
+    max_concurrency: int = typer.Option(
+        DEFAULT_MAX_CONCURRENCY,
+        "--max-concurrency",
+        min=1,
+        help="parallel workflow calls for fixture evals",
+    ),
 ) -> None:
     """Run an eval harness against a workflow's fixtures."""
     cancellation = CancellationController()
@@ -171,6 +178,7 @@ def eval(
             baseline_path=Path(baseline_path) if baseline_path else None,
             update_baseline=update_baseline,
             cancellation=cancellation,
+            max_concurrency=max_concurrency,
         )
     typer.echo(json.dumps({"status": out.get("status", "ok")}, indent=2))
     typer.echo(json.dumps(out["overall"], indent=2))
@@ -181,6 +189,38 @@ def eval(
         raise typer.Exit(code=130)
     if fail_on_regression and out.get("regression_detected"):
         raise typer.Exit(code=2)
+
+
+@app.command("eval-dataset")
+def eval_dataset(
+    workflow: str = typer.Argument(..., help="workflow id under workflows/*.yaml"),
+    config: Path = typer.Option(
+        ...,
+        "--config",
+        "-c",
+        help="dataset eval config YAML, usually evals/<workflow>/dataset_eval.yaml",
+    ),
+    max_concurrency: int | None = typer.Option(
+        None,
+        "--max-concurrency",
+        min=1,
+        help="override dataset_eval.yaml max_concurrency",
+    ),
+) -> None:
+    """Run a generalized dataset eval against a workflow."""
+    cancellation = CancellationController()
+    with _CancelHandler(cancellation):
+        out = run_dataset_eval(
+            workflow=workflow,
+            config_path=config,
+            max_concurrency=max_concurrency,
+            cancellation=cancellation,
+        )
+    typer.echo(json.dumps({"status": out.get("status", "ok")}, indent=2))
+    typer.echo(json.dumps(out["overall"], indent=2))
+    typer.echo(f"Full results written to {out['output_path']}")
+    if out.get("status") == "cancelled":
+        raise typer.Exit(code=130)
 
 
 @app.command("export-mermaid")

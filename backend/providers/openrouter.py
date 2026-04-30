@@ -9,9 +9,10 @@ import httpx
 
 from backend.runtime.errors import CancelledError
 
-from .base import CancelCheck, LLMResponse, ProviderError, Usage
+from .base import CancelCheck, EmbeddingResponse, LLMResponse, ProviderError, Usage
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings"
 
 
 class OpenRouterError(ProviderError):
@@ -55,6 +56,8 @@ def call_openrouter(
             if r.status_code != 200:
                 raise OpenRouterError(f"openrouter {r.status_code}: {r.text[:500]}")
             data = r.json()
+            if "choices" not in data:
+                raise OpenRouterError(f"openrouter malformed response: {json.dumps(data)[:500]}")
             text = data["choices"][0]["message"]["content"]
             usage_raw = data.get("usage", {}) or {}
             usage = Usage(
@@ -122,6 +125,64 @@ def stream_openrouter(
             time.sleep(min(2**attempt, 8))
 
     raise OpenRouterError(f"failed after {max_retries} attempts: {last_err}")
+
+
+def call_openrouter_embedding(
+    *,
+    model: str,
+    input_payload,
+    dimensions: int | None = None,
+    timeout_s: float = 60.0,
+    max_retries: int = 3,
+    api_key: str | None = None,
+) -> EmbeddingResponse:
+    api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise OpenRouterError("OPENROUTER_API_KEY is not set")
+
+    payload = {
+        "model": model,
+        "input": input_payload,
+        "encoding_format": "float",
+    }
+    if dimensions is not None:
+        payload["dimensions"] = dimensions
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    last_err: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            with httpx.Client(timeout=timeout_s) as client:
+                r = client.post(OPENROUTER_EMBEDDINGS_URL, json=payload, headers=headers)
+            if r.status_code == 429 or 500 <= r.status_code < 600:
+                raise OpenRouterError(f"transient {r.status_code}: {r.text[:200]}")
+            if r.status_code != 200:
+                raise OpenRouterError(f"openrouter embeddings {r.status_code}: {r.text[:500]}")
+            data = r.json()
+            items = data.get("data") or []
+            if not items or "embedding" not in items[0]:
+                raise OpenRouterError(f"openrouter embeddings malformed response: {json.dumps(data)[:500]}")
+            usage_raw = data.get("usage", {}) or {}
+            usage = Usage(
+                input_tokens=int(usage_raw.get("prompt_tokens", usage_raw.get("total_tokens", 0))),
+                output_tokens=0,
+            )
+            return EmbeddingResponse(
+                embedding=[float(x) for x in items[0]["embedding"]],
+                usage=usage,
+                model=model,
+            )
+        except (httpx.HTTPError, OpenRouterError) as e:
+            last_err = e
+            if attempt == max_retries - 1:
+                break
+            time.sleep(min(2**attempt, 8))
+
+    raise OpenRouterError(f"embeddings failed after {max_retries} attempts: {last_err}")
 
 
 def _stream_request(

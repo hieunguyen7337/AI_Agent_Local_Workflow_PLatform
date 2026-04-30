@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from . import openai, openrouter
-from .base import CancelCheck, LLMResponse, ProviderError, Usage
+from .base import CancelCheck, EmbeddingResponse, LLMResponse, ProviderError, Usage
 
 _PROVIDER_CALLS = {
     "openrouter": lambda **kwargs: openrouter.call_openrouter(**kwargs),
@@ -11,6 +11,9 @@ _PROVIDER_CALLS = {
 _PROVIDER_STREAM_CALLS = {
     "openrouter": lambda **kwargs: openrouter.stream_openrouter(**kwargs),
     "openai": lambda **kwargs: openai.stream_openai(**kwargs),
+}
+_PROVIDER_EMBEDDING_CALLS = {
+    "openrouter": lambda **kwargs: openrouter.call_openrouter_embedding(**kwargs),
 }
 
 
@@ -60,11 +63,33 @@ def stream_provider(
     )
 
 
+def call_embedding_provider(
+    provider: str,
+    *,
+    model: str,
+    input_payload,
+    dimensions: int | None = None,
+    timeout_s: float = 60.0,
+    max_retries: int = 3,
+) -> EmbeddingResponse:
+    if provider not in _PROVIDER_EMBEDDING_CALLS:
+        raise ProviderError(f"Unknown embedding provider {provider!r}")
+    return _PROVIDER_EMBEDDING_CALLS[provider](
+        model=model,
+        input_payload=input_payload,
+        dimensions=dimensions,
+        timeout_s=timeout_s,
+        max_retries=max_retries,
+    )
+
+
 __all__ = [
     "LLMResponse",
+    "EmbeddingResponse",
     "Usage",
     "ProviderError",
     "call_provider",
+    "call_embedding_provider",
     "stream_provider",
     "openai",
     "openrouter",

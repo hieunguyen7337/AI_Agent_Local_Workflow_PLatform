@@ -18,6 +18,13 @@ class LLMResponse:
     model: str
 
 
+@dataclass
+class EmbeddingResponse:
+    embedding: list[float]
+    usage: Usage
+    model: str
+
+
 class ProviderError(RuntimeError):
     pass
 

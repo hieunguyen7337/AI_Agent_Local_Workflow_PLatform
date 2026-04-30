@@ -10,7 +10,7 @@ The source of truth is YAML in `workflows/*.yaml`. LLMs should be able to read a
 
 Do not introduce JSON, Python modules, decorators, or custom DSLs as alternate workflow authoring formats.
 
-## Current Baseline (M5.15)
+## Current Baseline (M5.21)
 
 - YAML `GraphSpec` is canonical.
 - Python workflow fallback has been removed.
@@ -27,19 +27,33 @@ Do not introduce JSON, Python modules, decorators, or custom DSLs as alternate w
 - Template parameterization is convention-first: templates may use normal prompt/state placeholders such as `{user_input}`, copy preserves them unchanged, and customization happens through source review or the proposal/apply loop.
 - Template parameter metadata is schema-backed and documentation-only: `template_parameters` describe expected inputs for template UI review, and copied workflows clear them when becoming normal specs.
 - Template copy ergonomics include local target id validation, duplicate-id feedback, and post-copy source/audit guidance; backend validation remains authoritative.
+- Workflow library quality signals include static eval fixture presence/count and baseline freshness from `evals/<workflow>/`; these signals do not inspect latest runs or mutate baselines.
+- Workflow-as-function runtime exposes validated YAML workflows as reusable local Python functions via `backend.runtime.run_workflow_function`, accepting full workflow state while preserving `user_input` compatibility.
+- Batch workflow-function execution is available through `backend.runtime.run_workflow_batch` and `POST /api/workflows/{workflow}/batch-run`; default local concurrency is 50, results preserve input order, and each item writes normal isolated run artifacts.
+- Fixture evals and generalized dataset eval adapters run canonical workflow calls through the workflow-function boundary, with bounded local concurrency 50 by default. Proposal/optimization evals for in-memory YAML candidates still use low-level `run_graph`.
+- Telemetry is concurrency-safe: a single process-wide tracer routes spans by `workflow.run_id` to each run's own `telemetry.db` and `spans.jsonl`.
+- `python_tool` nodes call allowlisted local Python functions; callables must appear in `python_tools.yaml`; `inputs` maps function kwargs to state keys; `output_state_key` captures the return value. See `docs/python_tools.md`.
+- `llm` nodes can declare `image_inputs` that bind local image paths from state and send base64 `image_url` content parts to vision-capable providers at runtime.
+- `person_reid_market1501` workflow demonstrates live boss/final-ranker LLM calls + query-side specialists + per-specialist `python_tool` retrievers over offline attribute DBs; `person_reid_market1501_eval` uses precomputed query attributes for the 100-query/500-gallery partition. Pipeline includes `rrf_precompute` (weighted RRF, attribute weight=10) and `parse_final_ranking` (LLM output parser with regex fallback). Scorer reads `final_state.ranked_gallery_ids`. Eval baseline: mAP=34.5%, CMC@1/5/10=35%.
 
 Read `FUTURE_SCOPE.md` for the current next milestone and deferred work.
 
 ## Fast Repo Map
 
-- `workflows/*.yaml` - canonical workflow specs (`coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, `rag_subgraph_wrapper`, `approval_subgraph_wrapper`, `simple_llm_template`).
+- `workflows/*.yaml` - canonical workflow specs (`coder_tester`, `linear_rag`, `supervisor_loop`, `dispatch_aggregate`, `approval_review`, `rag_subgraph_wrapper`, `approval_subgraph_wrapper`, `simple_llm_template`, `person_reid_market1501`, `person_reid_market1501_eval`).
+- `python_tools.yaml` - allowlist of approved `python_tool` callable paths.
+- `backend/tools/` - approved local Python functions callable from `python_tool` nodes.
+- `backend/builder/python_tool_allowlist.py` - allowlist loader (cached, secure default = empty).
+- `backend/runtime/nodes/python_tool.py` - `python_tool` node factory.
 - `backend/graphspec/` - Pydantic spec models, YAML loading (`load_graph_spec`, `list_workflow_ids`), spec validation, conversion to metadata.
 - `backend/builder/` - internal graph metadata and compile helpers.
 - `backend/runtime/executor.py` - run execution and status handling.
+- `backend/runtime/functions.py` - workflow-as-function and batch public API.
 - `backend/runtime/artifacts.py` - run id, structured run dirs, manifest/artifact path helpers.
 - `backend/runtime/nodes/` - runtime node implementations.
 - `backend/checkpointing/replay.py` - replay behavior.
 - `backend/evals/` - eval harness, fixtures, metrics, regression.
+- `backend/evals/dataset.py` - generalized dataset eval adapters.
 - `backend/server/routes.py` - FastAPI routes.
 - `backend/cli/main.py` - CLI commands.
 - `frontend/src/App.tsx` - graph/workbench shell.
@@ -52,6 +66,8 @@ Read `FUTURE_SCOPE.md` for the current next milestone and deferred work.
 - `docs/run_artifacts.md` - how to inspect run files and SQLite DBs.
 - `docs/ui_vision_audit.md` - manual UI audit checklist.
 - `docs/workflow_library.md` - workflow naming, category, tag, template, and placeholder conventions.
+- `docs/python_tools.md` - how to register callables in `python_tools.yaml` and author `python_tool` YAML nodes.
+- `evals/person_reid_market1501/` - `dataset_eval.yaml`, `build_partition.py`, `build_attribute_dbs.py`, `build_dataset.py`, `build_gallery_db.py`, and gitignored partition/DB/index artifacts generated from local data.
 
 ## Common Commands
 
@@ -104,6 +120,7 @@ Run eval:
 - Treat source runs for approvals as immutable audit records. Decisions create continuation lineage.
 - Subgraphs support approval-bearing children (M5.8). Resume is handled via `_subgraph_resume` marker in state; source runs stay immutable.
 - Keep UI graph-first. Workbench panels should support the graph, not replace it.
+- Use `run_workflow_function` for canonical local integrations and `run_workflow_batch` for multi-input calls. Keep `run_graph` for compiled metadata, proposal evals, replay, approval continuation internals, subgraph internals, and low-level runtime tests.
 
 ## Testing Expectations
 
@@ -124,17 +141,11 @@ Run eval:
 
 ## Current Next Step
 
-Check `FUTURE_SCOPE.md`. The next milestone is **workflow library quality signals beyond validation**: surfacing eval fixture presence and baseline freshness without adding run history or hosted state. Key files to read first:
+Check `FUTURE_SCOPE.md`. The next milestone is **real specialist model wrappers for person reID**: replacing the three placeholder `python_tool` specialists in `person_reid_market1501` with real model implementations (TransReID/ViT, CLIP/SigLIP, HMR2.0/SMPLify). Current eval baseline with stubs: mAP=34.5%, CMC@1/5/10=35% (attribute channel weight=10 in RRF). Requires heavyweight model dependency and GPU loading choices. Read `FUTURE_SCOPE.md` and `docs/python_tools.md` before designing.
 
-- `backend/server/routes.py` - `GET /api/workflows`
-- `backend/evals/` - eval fixture and baseline conventions
-- `evals/` - fixture directories and baseline files
-- `frontend/src/App.tsx` - workflow selector and library summary
-- `frontend/src/types.ts` - `WorkflowSummary`
-- `docs/workflow_library.md` - accepted library/template conventions and deferred run history
+Implementation guardrails (carry forward):
 
-Implementation guardrails:
-
-- Keep quality signals static and filesystem-derived.
-- Do not add latest run status, hosted state, cloud persistence, or auth.
-- Keep discovery rooted in `WORKFLOW_SPECS_ROOT`; do not add a separate manifest.
+- Keep Python tool execution local, explicit, allowlisted, and auditable (`python_tools.yaml`).
+- Do not allow arbitrary module import from YAML without an approved boundary.
+- Do not add hosted state, cloud persistence, or auth.
+- Do not introduce a second workflow authoring format.

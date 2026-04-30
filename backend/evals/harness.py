@@ -13,6 +13,7 @@ from backend.graphspec import load_workflow_metadata
 from backend.builder.api import GraphMetadata
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
+from backend.runtime.functions import DEFAULT_MAX_CONCURRENCY, WorkflowBatchItem, run_workflow_batch
 
 EVALS_ROOT = Path("evals")
 
@@ -27,9 +28,10 @@ def run_eval(
     baseline_path: Path | None = None,
     update_baseline: bool = False,
     cancellation: CancellationController | None = None,
+    max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
 ) -> dict:
     metadata = load_workflow_metadata(workflow)
-    return run_eval_for_metadata(
+    return _run_eval_for_workflow_function(
         workflow=workflow,
         metadata=metadata,
         n_per_fixture=n_per_fixture,
@@ -39,7 +41,95 @@ def run_eval(
         baseline_path=baseline_path,
         update_baseline=update_baseline,
         cancellation=cancellation,
+        max_concurrency=max_concurrency,
     )
+
+
+def _run_eval_for_workflow_function(
+    *,
+    workflow: str,
+    metadata: GraphMetadata,
+    n_per_fixture: int = 4,
+    fixtures_path: Path | None = None,
+    runs_root: Path = Path("runs"),
+    output_path: Path | None = None,
+    baseline_path: Path | None = None,
+    update_baseline: bool = False,
+    cancellation: CancellationController | None = None,
+    max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+) -> dict:
+    has_tester_node = any(getattr(cfg, "kind", "") == "tester" for cfg in metadata.nodes.values())
+    fixtures_path = fixtures_path or EVALS_ROOT / workflow / "fixtures.yaml"
+    fixtures = load_fixtures(fixtures_path)
+
+    jobs: list[tuple[Fixture, int, WorkflowBatchItem]] = []
+    for fx in fixtures:
+        for i in range(n_per_fixture):
+            input_state: dict[str, object] = {"user_input": fx.input, "_expected": fx.expected}
+            if fx.test_code:
+                input_state["_test_code"] = fx.test_code
+            jobs.append(
+                (
+                    fx,
+                    i,
+                    WorkflowBatchItem(
+                        id=f"{fx.id}:{i}",
+                        input_state=input_state,
+                        expected=fx.expected,
+                    ),
+                )
+            )
+
+    batch_results = run_workflow_batch(
+        workflow,
+        [job[2] for job in jobs],
+        max_concurrency=max_concurrency,
+        runs_root=runs_root,
+        cancellation=cancellation,
+    )
+
+    all_results: list[dict] = []
+    per_fixture_results: dict[str, list[dict]] = {}
+    approval_path_coverage: dict[str, int] = {}
+    for (fx, iteration, _item), result in zip(jobs, batch_results):
+        eval_result = _build_eval_result(
+            workflow=workflow,
+            metadata=metadata,
+            fixture=fx,
+            iteration=iteration,
+            result=result,
+            runs_root=runs_root,
+            has_tester_node=has_tester_node,
+        )
+        if eval_result.get("approval_decision"):
+            decision = str(eval_result["approval_decision"])
+            approval_path_coverage[decision] = approval_path_coverage.get(decision, 0) + 1
+        all_results.append(eval_result)
+        per_fixture_results.setdefault(fx.id, []).append(eval_result)
+
+    per_fixture_summaries = {
+        fid: summarize(results)
+        for fid, results in per_fixture_results.items()
+    }
+    per_fixture_ci = {
+        fid: _ci_dict(results)
+        for fid, results in per_fixture_results.items()
+    }
+    status = "cancelled" if cancellation is not None and cancellation.is_cancelled() else "ok"
+    out = _build_eval_output(
+        workflow=workflow,
+        n_per_fixture=n_per_fixture,
+        fixture_count=len(fixtures),
+        status=status,
+        all_results=all_results,
+        per_fixture_summaries=per_fixture_summaries,
+        per_fixture_ci=per_fixture_ci,
+        approval_path_coverage=approval_path_coverage,
+        baseline_path=baseline_path or EVALS_ROOT / workflow / "baseline.json",
+        output_path=output_path or runs_root / f"eval_{workflow}.json",
+        update_baseline=update_baseline,
+    )
+    return out
 
 
 def run_eval_for_metadata(
@@ -186,6 +276,83 @@ def run_eval_for_metadata(
     return out
 
 
+def _build_eval_output(
+    *,
+    workflow: str,
+    n_per_fixture: int,
+    fixture_count: int,
+    status: str,
+    all_results: list[dict],
+    per_fixture_summaries: dict[str, EvalSummary],
+    per_fixture_ci: dict[str, dict],
+    approval_path_coverage: dict[str, int],
+    baseline_path: Path,
+    output_path: Path,
+    update_baseline: bool,
+) -> dict:
+    overall = summarize(all_results)
+    overall_ci = _ci_dict(all_results)
+    out = {
+        "workflow": workflow,
+        "n_per_fixture": n_per_fixture,
+        "fixture_count": fixture_count,
+        "status": status,
+        "completed_fixture_count": len(per_fixture_summaries),
+        "completed_run_count": len(all_results),
+        "overall": asdict(overall),
+        "overall_ci": overall_ci,
+        "per_fixture": {fid: asdict(s) for fid, s in per_fixture_summaries.items()},
+        "per_fixture_ci": per_fixture_ci,
+        "approval_path_coverage": approval_path_coverage,
+        "results": all_results,
+    }
+
+    baseline_payload: dict | None = None
+    if update_baseline and out["status"] != "cancelled":
+        baseline_payload = build_baseline_snapshot(out)
+        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        with baseline_path.open("w", encoding="utf-8") as bf:
+            json.dump(baseline_payload, bf, indent=2)
+    elif baseline_path.exists():
+        try:
+            with baseline_path.open("r", encoding="utf-8") as bf:
+                baseline_payload = json.load(bf)
+        except Exception:
+            baseline_payload = None
+
+    if out["status"] == "cancelled":
+        baseline_comparison = {
+            "status": "cancelled",
+            "baseline_path": str(baseline_path),
+            "regression_detected": False,
+            "metrics": [],
+            "regressions": [],
+        }
+    elif baseline_payload is None:
+        baseline_comparison = {
+            "status": "no_baseline",
+            "baseline_path": str(baseline_path),
+            "regression_detected": False,
+            "metrics": [],
+            "regressions": [],
+        }
+    else:
+        baseline_comparison = compare_against_baseline(current=out, baseline=baseline_payload)
+        baseline_comparison["baseline_path"] = str(baseline_path)
+        if update_baseline:
+            baseline_comparison["status"] = "baseline_updated"
+            baseline_comparison["regression_detected"] = False
+            baseline_comparison["regressions"] = []
+
+    out["baseline_comparison"] = baseline_comparison
+    out["regression_detected"] = bool(baseline_comparison.get("regression_detected", False))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(out, f, indent=2)
+    return out
+
+
 def _ci_dict(results: list[dict]) -> dict[str, dict[str, float]]:
     ci = confidence_intervals(results)
     return {
@@ -245,9 +412,10 @@ def _build_eval_result(
             "status": result.status,
             "error": result.error,
         }
-        subgraphs = _read_subgraph_lineage(result.run_dir)
-        if subgraphs:
-            eval_result["subgraphs"] = subgraphs
+        if result.run_dir is not None:
+            subgraphs = _read_subgraph_lineage(result.run_dir)
+            if subgraphs:
+                eval_result["subgraphs"] = subgraphs
         return eval_result
 
     # Detect nested approval subgraph: parent paused but has no own approval.json.

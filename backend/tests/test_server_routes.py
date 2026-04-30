@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -93,21 +94,22 @@ def test_start_run_endpoint_runs_selected_workflow(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
     captured = {}
 
-    def _fake_run_graph(metadata, **kwargs):
-        captured["metadata"] = metadata
+    def _fake_run_workflow_function(workflow, input_state, **kwargs):
+        captured["workflow"] = workflow
+        captured["input_state"] = input_state
         captured["kwargs"] = kwargs
         return SimpleNamespace(
             run_id="run_api_start",
-            graph_name=metadata.name,
+            workflow=workflow,
             status="ok",
             error=None,
             cost_usd=0.01,
             latency_ms=12.0,
-            run_dir=run_dir_for_id(runs_root, metadata.name, "run_api_start"),
+            run_dir=run_dir_for_id(runs_root, workflow, "run_api_start"),
             final_state={"final_answer": "done"},
         )
 
-    monkeypatch.setattr(routes, "run_graph", _fake_run_graph)
+    monkeypatch.setattr(routes, "run_workflow_function", _fake_run_workflow_function)
 
     client = TestClient(app)
     resp = client.post(
@@ -119,10 +121,59 @@ def test_start_run_endpoint_runs_selected_workflow(tmp_path: Path, monkeypatch):
     assert body["run_id"] == "run_api_start"
     assert body["graph_name"] == "linear_rag"
     assert body["final_state"]["final_answer"] == "done"
-    assert captured["metadata"].name == "linear_rag"
-    assert captured["kwargs"]["user_input"] == "What is the refund window?"
+    assert captured["workflow"] == "linear_rag"
+    assert captured["input_state"] == "What is the refund window?"
     assert captured["kwargs"]["expected"] == "30 days"
     assert captured["kwargs"]["runs_root"] == runs_root
+
+
+def test_batch_run_endpoint_accepts_multiple_inputs(monkeypatch, tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    captured = {}
+
+    def _fake_run_workflow_batch(workflow, items, **kwargs):
+        captured["workflow"] = workflow
+        captured["items"] = items
+        captured["kwargs"] = kwargs
+        return [
+            SimpleNamespace(
+                id=item.id,
+                status="ok",
+                final_state={"answer": item.input_state["user_input"]},
+                run_id=f"run_{item.id}",
+                run_dir=run_dir_for_id(runs_root, workflow, f"run_{item.id}"),
+                error=None,
+                cost_usd=0.01,
+                latency_ms=10.0,
+            )
+            for item in items
+        ]
+
+    monkeypatch.setattr(routes, "run_workflow_batch", _fake_run_workflow_batch)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/workflows/linear_rag/batch-run",
+        json={
+            "max_concurrency": 2,
+            "items": [
+                {"id": "a", "input_state": {"user_input": "first"}},
+                {"id": "b", "input_state": {"user_input": "second"}},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["workflow"] == "linear_rag"
+    assert [item["id"] for item in body["results"]] == ["a", "b"]
+    assert body["results"][0]["final_state"]["answer"] == "first"
+    assert captured["kwargs"]["max_concurrency"] == 2
+
+
+def test_batch_run_request_default_max_concurrency_is_50():
+    request = routes.BatchRunRequest(items=[routes.BatchRunItem(input_state={"user_input": "x"})])
+    assert request.max_concurrency == 50
 
 
 def test_start_run_missing_workflow_returns_404():
@@ -138,7 +189,7 @@ def test_get_graph_linear_rag_shape():
     body = resp.json()
     assert body["name"] == "linear_rag"
     node_ids = {n["id"] for n in body["nodes"]}
-    assert {"query_analyser", "retriever", "reranker", "synthesiser"} <= node_ids
+    assert {"query_analyser", "query_embedding", "vector_retriever", "reranker", "synthesiser"} <= node_ids
 
 
 def test_get_graph_supervisor_loop_shape():
@@ -1178,7 +1229,9 @@ def test_list_workflows_endpoint(monkeypatch, tmp_path: Path):
     specs_root.mkdir()
     (specs_root / "alpha.yaml").write_text(_minimal_spec("Alpha Workflow", "First workflow", "node_a"), encoding="utf-8")
     (specs_root / "beta.yaml").write_text(_minimal_spec("Beta Workflow", "Second workflow", "node_b"), encoding="utf-8")
+    evals_root = tmp_path / "evals"
     monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
 
     client = TestClient(app)
     resp = client.get("/api/workflows")
@@ -1202,6 +1255,16 @@ def test_list_workflows_endpoint(monkeypatch, tmp_path: Path):
         "approval_node_count": 0,
         "subgraph_node_count": 0,
     }
+    assert items[0]["eval_quality"] == {
+        "fixture_status": "missing",
+        "fixture_path": (evals_root / "alpha" / "fixtures.yaml").as_posix(),
+        "fixture_count": 0,
+        "fixture_errors": [],
+        "baseline_status": "not_applicable",
+        "baseline_path": (evals_root / "alpha" / "baseline.json").as_posix(),
+        "baseline_updated_at": None,
+        "stale_reasons": [],
+    }
     assert items[1]["id"] == "beta"
     assert items[1]["name"] == "Beta Workflow"
 
@@ -1211,7 +1274,15 @@ def test_list_workflows_broken_spec_still_listed(monkeypatch, tmp_path: Path):
     specs_root.mkdir()
     (specs_root / "good.yaml").write_text(_minimal_spec("Good", "OK", "node_g"), encoding="utf-8")
     (specs_root / "broken.yaml").write_text("not: [valid yaml for graphspec", encoding="utf-8")
+    evals_root = tmp_path / "evals"
+    broken_eval_dir = evals_root / "broken"
+    broken_eval_dir.mkdir(parents=True)
+    (broken_eval_dir / "fixtures.yaml").write_text(
+        "- id: one\n  input: hello\n  expected: hello\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
 
     client = TestClient(app)
     resp = client.get("/api/workflows")
@@ -1235,6 +1306,9 @@ def test_list_workflows_broken_spec_still_listed(monkeypatch, tmp_path: Path):
         "approval_node_count": 0,
         "subgraph_node_count": 0,
     }
+    assert broken["eval_quality"]["fixture_status"] == "present"
+    assert broken["eval_quality"]["fixture_count"] == 1
+    assert broken["eval_quality"]["baseline_status"] == "missing"
 
 
 def test_list_workflows_endpoint_returns_library_metadata(monkeypatch, tmp_path: Path):
@@ -1245,7 +1319,9 @@ def test_list_workflows_endpoint_returns_library_metadata(monkeypatch, tmp_path:
         .replace("description: Has metadata\n", "description: Has metadata\ncategory: rag\ntags:\n  - retrieval\n  - example\n"),
         encoding="utf-8",
     )
+    evals_root = tmp_path / "evals"
     monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
 
     client = TestClient(app)
     resp = client.get("/api/workflows")
@@ -1269,6 +1345,16 @@ def test_list_workflows_endpoint_returns_library_metadata(monkeypatch, tmp_path:
                 "approval_node_count": 0,
                 "subgraph_node_count": 0,
             },
+            "eval_quality": {
+                "fixture_status": "missing",
+                "fixture_path": (evals_root / "searchable" / "fixtures.yaml").as_posix(),
+                "fixture_count": 0,
+                "fixture_errors": [],
+                "baseline_status": "not_applicable",
+                "baseline_path": (evals_root / "searchable" / "baseline.json").as_posix(),
+                "baseline_updated_at": None,
+                "stale_reasons": [],
+            },
         }
     ]
 
@@ -1288,7 +1374,9 @@ def test_list_workflows_invalid_graphspec_still_listed_with_errors(monkeypatch, 
         ),
         encoding="utf-8",
     )
+    evals_root = tmp_path / "evals"
     monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
 
     client = TestClient(app)
     resp = client.get("/api/workflows")
@@ -1299,6 +1387,8 @@ def test_list_workflows_invalid_graphspec_still_listed_with_errors(monkeypatch, 
     assert body[0]["validation_errors"]
     assert "entry node" in body[0]["validation_errors"][0]
     assert body[0]["facts"]["node_count"] == 0
+    assert body[0]["eval_quality"]["fixture_status"] == "missing"
+    assert body[0]["eval_quality"]["baseline_status"] == "not_applicable"
 
 
 def test_list_workflows_counts_approval_and_subgraph_nodes(monkeypatch, tmp_path: Path):
@@ -1333,6 +1423,7 @@ def test_list_workflows_counts_approval_and_subgraph_nodes(monkeypatch, tmp_path
         ),
         encoding="utf-8",
     )
+    monkeypatch.setattr(routes, "EVALS_ROOT", tmp_path / "evals")
     monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
 
     client = TestClient(app)
@@ -1347,6 +1438,116 @@ def test_list_workflows_counts_approval_and_subgraph_nodes(monkeypatch, tmp_path
         "approval_node_count": 1,
         "subgraph_node_count": 1,
     }
+
+
+def test_list_workflows_eval_quality_fresh_baseline(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    evals_root = tmp_path / "evals"
+    specs_root.mkdir()
+    eval_dir = evals_root / "alpha"
+    eval_dir.mkdir(parents=True)
+    spec_path = specs_root / "alpha.yaml"
+    fixtures_path = eval_dir / "fixtures.yaml"
+    baseline_path = eval_dir / "baseline.json"
+    spec_path.write_text(_minimal_spec("Alpha", "First workflow", "node_a"), encoding="utf-8")
+    fixtures_path.write_text("- id: one\n  input: hello\n  expected: hello\n", encoding="utf-8")
+    baseline_path.write_text(json.dumps({"workflow": "alpha", "overall": {}}), encoding="utf-8")
+    now = time.time()
+    old = now - 100
+    spec_path.touch()
+    fixtures_path.touch()
+    baseline_path.touch()
+    import os
+
+    os.utime(spec_path, (old, old))
+    os.utime(fixtures_path, (old + 10, old + 10))
+    os.utime(baseline_path, (now, now))
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    quality = resp.json()[0]["eval_quality"]
+    assert quality["fixture_status"] == "present"
+    assert quality["fixture_count"] == 1
+    assert quality["fixture_errors"] == []
+    assert quality["baseline_status"] == "fresh"
+    assert quality["baseline_path"] == baseline_path.as_posix()
+    assert isinstance(quality["baseline_updated_at"], int)
+    assert quality["stale_reasons"] == []
+
+
+def test_list_workflows_eval_quality_invalid_fixture(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    evals_root = tmp_path / "evals"
+    specs_root.mkdir()
+    eval_dir = evals_root / "alpha"
+    eval_dir.mkdir(parents=True)
+    (specs_root / "alpha.yaml").write_text(_minimal_spec("Alpha", "First workflow", "node_a"), encoding="utf-8")
+    (eval_dir / "fixtures.yaml").write_text("not_a_list: true\n", encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    quality = resp.json()[0]["eval_quality"]
+    assert quality["fixture_status"] == "invalid"
+    assert quality["fixture_count"] == 0
+    assert quality["fixture_errors"]
+    assert quality["baseline_status"] == "not_applicable"
+
+
+def test_list_workflows_eval_quality_missing_invalid_and_stale_baselines(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    evals_root = tmp_path / "evals"
+    specs_root.mkdir()
+    import os
+
+    for wid in ("missing_base", "invalid_base", "stale_base"):
+        (specs_root / f"{wid}.yaml").write_text(_minimal_spec(wid, "Workflow", "node_a"), encoding="utf-8")
+        eval_dir = evals_root / wid
+        eval_dir.mkdir(parents=True)
+        (eval_dir / "fixtures.yaml").write_text("- id: one\n  input: hello\n  expected: hello\n", encoding="utf-8")
+
+    (evals_root / "invalid_base" / "baseline.json").write_text("{not valid json", encoding="utf-8")
+    stale_baseline = evals_root / "stale_base" / "baseline.json"
+    stale_baseline.write_text(json.dumps({"workflow": "stale_base", "overall": {}}), encoding="utf-8")
+    old = time.time() - 100
+    os.utime(stale_baseline, (old, old))
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    by_id = {item["id"]: item["eval_quality"] for item in resp.json()}
+    assert by_id["missing_base"]["baseline_status"] == "missing"
+    assert by_id["invalid_base"]["baseline_status"] == "invalid"
+    assert by_id["invalid_base"]["fixture_errors"]
+    assert by_id["stale_base"]["baseline_status"] == "stale"
+    assert "workflow spec is newer than baseline" in by_id["stale_base"]["stale_reasons"]
+
+
+def test_list_workflows_eval_quality_mismatched_baseline_invalid(monkeypatch, tmp_path: Path):
+    specs_root = tmp_path / "workflows"
+    evals_root = tmp_path / "evals"
+    specs_root.mkdir()
+    eval_dir = evals_root / "alpha"
+    eval_dir.mkdir(parents=True)
+    (specs_root / "alpha.yaml").write_text(_minimal_spec("Alpha", "First workflow", "node_a"), encoding="utf-8")
+    (eval_dir / "fixtures.yaml").write_text("- id: one\n  input: hello\n  expected: hello\n", encoding="utf-8")
+    (eval_dir / "baseline.json").write_text(json.dumps({"workflow": "beta"}), encoding="utf-8")
+    monkeypatch.setattr(routes, "WORKFLOW_SPECS_ROOT", specs_root)
+    monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
+
+    client = TestClient(app)
+    resp = client.get("/api/workflows")
+    assert resp.status_code == 200
+    quality = resp.json()[0]["eval_quality"]
+    assert quality["baseline_status"] == "invalid"
+    assert "does not match workflow" in quality["fixture_errors"][0]
 
 
 def _template_spec(name: str = "Template") -> str:

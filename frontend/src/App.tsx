@@ -40,8 +40,17 @@ function workflowMatchesSearch(workflow: WorkflowSummary, search: string) {
     workflow.template_parameter_count > 0 ? `${workflow.template_parameter_count} parameters expected inputs` : "",
     workflow.validation_status,
     workflow.source_path,
+    workflow.eval_quality.fixture_status,
+    `fixtures ${workflow.eval_quality.fixture_status}`,
+    workflow.eval_quality.fixture_path,
+    `${workflow.eval_quality.fixture_count} fixtures`,
+    workflow.eval_quality.baseline_status,
+    `baseline ${workflow.eval_quality.baseline_status}`,
+    workflow.eval_quality.baseline_path,
     ...workflow.tags,
     ...workflow.validation_errors,
+    ...workflow.eval_quality.fixture_errors,
+    ...workflow.eval_quality.stale_reasons,
   ]
     .join(" ")
     .toLowerCase()
@@ -51,6 +60,15 @@ function workflowMatchesSearch(workflow: WorkflowSummary, search: string) {
 function workflowOptionLabel(workflow: WorkflowSummary) {
   if (workflow.validation_status === "invalid") {
     return `${workflow.name} (invalid)`;
+  }
+  if (workflow.eval_quality.fixture_status === "invalid") {
+    return `${workflow.name} (fixtures invalid)`;
+  }
+  if (workflow.eval_quality.baseline_status === "stale") {
+    return `${workflow.name} (baseline stale)`;
+  }
+  if (workflow.eval_quality.baseline_status === "missing") {
+    return `${workflow.name} (baseline missing)`;
   }
   if (workflow.template) {
     return `${workflow.name} (template)`;
@@ -64,8 +82,15 @@ function workflowOptionTitle(workflow: WorkflowSummary) {
     workflow.source_path,
     workflow.template ? "template" : "",
     workflow.template_parameter_count > 0 ? `${workflow.template_parameter_count} parameters` : "",
+    `fixtures: ${workflow.eval_quality.fixture_status}`,
+    `fixture count: ${workflow.eval_quality.fixture_count}`,
+    workflow.eval_quality.fixture_path,
+    `baseline: ${workflow.eval_quality.baseline_status}`,
+    workflow.eval_quality.baseline_path,
     workflow.tags.join(", "),
     ...workflow.validation_errors,
+    ...workflow.eval_quality.fixture_errors,
+    ...workflow.eval_quality.stale_reasons,
   ].filter(Boolean).join(" | ");
 }
 
@@ -86,6 +111,12 @@ function workflowFactSummary(workflow: WorkflowSummary | undefined) {
   if (workflow.template_parameter_count > 0) {
     parts.push(`${workflow.template_parameter_count} parameters`);
   }
+  const fixtureLabel =
+    workflow.eval_quality.fixture_status === "present"
+      ? `fixtures: ${workflow.eval_quality.fixture_count}`
+      : `fixtures: ${workflow.eval_quality.fixture_status}`;
+  parts.push(fixtureLabel);
+  parts.push(`baseline: ${workflow.eval_quality.baseline_status.replace("_", " ")}`);
   return parts.join(" · ");
 }
 
@@ -167,10 +198,14 @@ export default function App() {
   const workflowHealth = useMemo(() => {
     const items = workflows.data ?? [];
     const valid = items.filter((item) => item.validation_status === "valid").length;
+    const fixtureReady = items.filter((item) => item.eval_quality.fixture_status === "present").length;
+    const freshBaseline = items.filter((item) => item.eval_quality.baseline_status === "fresh").length;
     return {
       total: items.length,
       valid,
       invalid: items.length - valid,
+      fixtureReady,
+      freshBaseline,
     };
   }, [workflows.data]);
 
@@ -214,11 +249,21 @@ export default function App() {
             <span className={workflowHealth.invalid > 0 ? "text-red-700" : "text-slate-500"}>
               {workflowHealth.invalid}
             </span>{" "}
-            invalid
+            invalid · <span className="text-sky-700">{workflowHealth.fixtureReady}</span> fixture-ready ·{" "}
+            <span className="text-indigo-700">{workflowHealth.freshBaseline}</span> fresh baseline
             {selectedWorkflowSummary && (
               <span>
                 {" · "}
-                <span className={selectedWorkflowSummary.validation_status === "invalid" ? "text-red-700" : ""}>
+                <span
+                  className={
+                    selectedWorkflowSummary.validation_status === "invalid" ||
+                    selectedWorkflowSummary.eval_quality.fixture_status === "invalid" ||
+                    selectedWorkflowSummary.eval_quality.baseline_status === "stale" ||
+                    selectedWorkflowSummary.eval_quality.baseline_status === "invalid"
+                      ? "text-red-700"
+                      : ""
+                  }
+                >
                   {workflowFactSummary(selectedWorkflowSummary)}
                 </span>
               </span>

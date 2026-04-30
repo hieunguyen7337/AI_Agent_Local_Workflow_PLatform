@@ -1,0 +1,7 @@
+allowed_callables:
+  - backend.tools.reid_specialists.start_passthrough
+  - backend.tools.reid_specialists.query_llm_attribute_lookup
+  - backend.tools.reid_specialists.multimodal_embedding_lookup
+  - backend.tools.reid_specialists.llm_attribute_gallery_retriever
+  - backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
+  - backend.tools.reid_specialists.parse_final_ranking

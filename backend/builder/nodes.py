@@ -17,6 +17,15 @@ class NodeConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class LLMImageInputConfig(BaseModel):
+    """Image state binding for multimodal LLM calls."""
+
+    state_key: str = Field(min_length=1)
+    detail: Literal["auto", "low", "high"] = "auto"
+
+    model_config = {"extra": "forbid"}
+
+
 class LLMNodeConfig(NodeConfig):
     kind: Literal["llm"] = "llm"
     provider: Literal["openrouter", "openai"] = "openrouter"
@@ -24,9 +33,34 @@ class LLMNodeConfig(NodeConfig):
     system_prompt: str
     user_prompt_template: str  # format string over state keys, e.g. "Task: {user_input}\nPlan: {plan}"
     output_state_key: str  # which state field to write the response to
+    image_inputs: list[LLMImageInputConfig] = Field(default_factory=list)
     temperature: float = 0.2
     max_tokens: int | None = None
     max_retries: int = 3
+
+
+class EmbeddingNodeConfig(NodeConfig):
+    """Hosted embedding model call. Writes a float vector into workflow state."""
+
+    kind: Literal["embedding"] = "embedding"
+    provider: Literal["openrouter"] = "openrouter"
+    model: str
+    input_template: str = ""
+    image_inputs: list[LLMImageInputConfig] = Field(default_factory=list)
+    output_state_key: str = Field(min_length=1)
+    dimensions: int | None = Field(default=None, gt=0)
+    max_retries: int = 3
+
+
+class VectorRetrieverNodeConfig(NodeConfig):
+    """Local vector search over a SQLite embedding index."""
+
+    kind: Literal["vector_retriever"] = "vector_retriever"
+    index_path: str = Field(min_length=1)
+    query_embedding_state_key: str = Field(min_length=1)
+    output_state_key: str = Field(min_length=1)
+    top_k: int = Field(2, gt=0)
+    id_output_state_key: str | None = None
 
 
 class TesterNodeConfig(NodeConfig):
@@ -113,6 +147,26 @@ class SubgraphNodeConfig(NodeConfig):
             if not str(source).strip() or not str(target).strip():
                 raise ValueError("subgraph mappings require non-empty string keys and values")
         return value
+
+
+class PythonToolNodeConfig(NodeConfig):
+    """Local Python function node. Callable must be in python_tools.yaml allowlist."""
+
+    kind: Literal["python_tool"] = "python_tool"
+    callable_path: str = Field(min_length=1)
+    inputs: dict[str, str] = Field(default_factory=dict)
+    output_state_key: str = Field(min_length=1)
+
+    @field_validator("callable_path")
+    @classmethod
+    def _allowlisted(cls, v: str) -> str:
+        from backend.builder.python_tool_allowlist import load_allowlist
+
+        if v not in load_allowlist():
+            raise ValueError(
+                f"callable_path {v!r} is not in the python_tools.yaml allowlist"
+            )
+        return v
 
 
 class LoopConfig(BaseModel):

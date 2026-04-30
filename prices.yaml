@@ -2,6 +2,21 @@ openrouter:
   minimax/minimax-m2.7:
     input_per_mtok_usd: 0.15
     output_per_mtok_usd: 1.20
+  google/gemma-4-26b-a4b-it:
+    input_per_mtok_usd: 0.06
+    output_per_mtok_usd: 0.33
+  google/gemma-4-31b-it:
+    input_per_mtok_usd: 0.10
+    output_per_mtok_usd: 0.30
+  qwen/qwen3.5-9b:
+    input_per_mtok_usd: 0.05
+    output_per_mtok_usd: 0.10
+  qwen/qwen3-vl-8b-instruct:
+    input_per_mtok_usd: 0.08
+    output_per_mtok_usd: 0.50
+  google/gemini-embedding-2-preview:
+    input_per_mtok_usd: 0.20
+    output_per_mtok_usd: 0.00
 openai:
   gpt-4o-mini:
     input_per_mtok_usd: 0.15

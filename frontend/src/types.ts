@@ -9,6 +9,16 @@ export interface WorkflowSummary {
   validation_status: "valid" | "invalid";
   validation_errors: string[];
   source_path: string;
+  eval_quality: {
+    fixture_status: "present" | "missing" | "invalid";
+    fixture_path: string;
+    fixture_count: number;
+    fixture_errors: string[];
+    baseline_status: "fresh" | "missing" | "stale" | "invalid" | "not_applicable";
+    baseline_path: string;
+    baseline_updated_at: number | null;
+    stale_reasons: string[];
+  };
   facts: {
     node_count: number;
     edge_count: number;
@@ -25,7 +35,17 @@ export interface TemplateParameter {
   example?: string | null;
 }
 
-export type NodeKind = "llm" | "tester" | "gate" | "retriever" | "router" | "approval" | "subgraph";
+export type NodeKind =
+  | "llm"
+  | "embedding"
+  | "tester"
+  | "gate"
+  | "retriever"
+  | "vector_retriever"
+  | "router"
+  | "approval"
+  | "subgraph"
+  | "python_tool";
 
 export interface GraphNode {
   id: string;

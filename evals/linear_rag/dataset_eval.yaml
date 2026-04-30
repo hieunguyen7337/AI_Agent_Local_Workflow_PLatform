@@ -1,0 +1,11 @@
+dataset_path: dataset.yaml
+dataset_format: yaml
+input_mapping:
+  user_input: question
+  _expected: expected
+  artifacts.row_id: id
+scorers:
+  - id: final_answer_contains_expected
+    type: substring
+    actual: final_state.final_answer
+    expected: row.expected

@@ -1,0 +1,3 @@
+- id: refund_window
+  question: What is the refund window for Nimbus Cloud subscriptions?
+  expected: 30 days

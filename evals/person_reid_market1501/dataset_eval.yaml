@@ -1,0 +1,25 @@
+dataset_path: partition_100q_500g/dataset.yaml
+dataset_format: yaml
+input_mapping:
+  user_input: query_id
+  query_image_path: query_image_path
+  query_db_path: query_db_path
+  query_embedding_db_path: query_embedding_db_path
+  gallery_db_path: gallery_db_path
+  gallery_embedding_db_path: gallery_embedding_db_path
+  retrieval_top_k: retrieval_top_k
+  query_pid: query_pid
+  query_camid: query_camid
+  gallery_pids: gallery_pids
+  gallery_camids: gallery_camids
+max_concurrency: 50
+scorers:
+  - id: market1501_map_cmc
+    type: map_cmc
+    actual: final_state.ranked_gallery_ids
+    gallery_ids: row.gallery_ids
+    gallery_pids: row.gallery_pids
+    gallery_camids: row.gallery_camids
+    query_pid: row.query_pid
+    query_camid: row.query_camid
+    cmc_ks: [1, 5, 10]

@@ -15,3 +15,10 @@ runs/*
 *.sqlite
 *.sqlite3
 .DS_Store
+evals/person_reid_market1501/dataset.yaml
+evals/person_reid_market1501/gallery_index/
+evals/person_reid_market1501/gallery_db/
+evals/person_reid_market1501/attribute_db/
+evals/person_reid_market1501/embedding_db/
+evals/person_reid_market1501/partition_100q_500g/
+dataset/

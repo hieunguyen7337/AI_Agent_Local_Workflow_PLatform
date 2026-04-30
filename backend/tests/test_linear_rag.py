@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from backend.providers import openai as oai
-from backend.providers.base import LLMResponse, Usage
+from backend.providers.base import EmbeddingResponse, LLMResponse, Usage
 from backend.runtime.executor import run_graph
 from backend.runtime.nodes.retriever import make_retriever_node
 from backend.builder.nodes import RetrieverNodeConfig
@@ -18,7 +18,13 @@ def test_linear_rag_compile_is_acyclic():
     metadata = load_workflow_metadata("linear_rag")
     assert metadata.entry == "query_analyser"
     assert metadata.loops == []
-    assert metadata.node_ids() == ["query_analyser", "retriever", "reranker", "synthesiser"]
+    assert metadata.node_ids() == [
+        "query_analyser",
+        "query_embedding",
+        "vector_retriever",
+        "reranker",
+        "synthesiser",
+    ]
 
 
 def test_retriever_node_is_deterministic(tmp_path: Path):
@@ -71,7 +77,16 @@ def test_linear_rag_runtime_and_eval(monkeypatch, tmp_path: Path):
         return LLMResponse(text="refund window nimbus cloud", usage=Usage(1, 1), model="m")
 
     monkeypatch.setattr(oai, "stream_openai", _reply)
+    monkeypatch.setattr(
+        "backend.runtime.nodes.embedding.call_embedding_provider",
+        lambda *args, **kwargs: EmbeddingResponse(
+            embedding=[1.0] + [0.0] * 767,
+            usage=Usage(1, 0),
+            model=kwargs["model"],
+        ),
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     metadata = load_workflow_metadata("linear_rag")
     run = run_graph(

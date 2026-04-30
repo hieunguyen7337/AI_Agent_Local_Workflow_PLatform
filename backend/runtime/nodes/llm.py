@@ -1,6 +1,9 @@
 """Generic LLM node factory. Wraps provider call + GenAI span emission + budget update."""
 from __future__ import annotations
 
+import base64
+import mimetypes
+from pathlib import Path
 import time
 from typing import Callable
 
@@ -55,7 +58,8 @@ def make_llm_node(
         with tracer.start_as_current_span(f"node.{cfg.id}", attributes=attrs) as span:
             t0 = time.monotonic_ns()
             try:
-                user_content = _format_template(cfg.user_prompt_template, state)
+                user_text = _format_template(cfg.user_prompt_template, state)
+                user_content = _build_user_content(user_text, state, cfg.image_inputs)
                 messages = [
                     {"role": "system", "content": cfg.system_prompt},
                     {"role": "user", "content": user_content},
@@ -110,3 +114,31 @@ def _format_template(template: str, state: WorkflowState) -> str:
             return ""
 
     return template.format_map(_SafeDict(state))
+
+
+def _build_user_content(user_text: str, state: WorkflowState, image_inputs: list) -> str | list[dict]:
+    if not image_inputs:
+        return user_text
+
+    content: list[dict] = [{"type": "text", "text": user_text}]
+    for image_input in image_inputs:
+        path_value = state[image_input.state_key]
+        image_url = _image_path_to_data_url(Path(str(path_value)))
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_url,
+                    "detail": image_input.detail,
+                },
+            }
+        )
+    return content
+
+
+def _image_path_to_data_url(path: Path) -> str:
+    if not path.is_file():
+        raise FileNotFoundError(f"image input not found: {path}")
+    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections import defaultdict
 from pathlib import Path
 from typing import Sequence
 
@@ -135,6 +136,52 @@ class SqliteJsonlExporter(SpanExporter):
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return True
+
+
+class RoutingSpanExporter(SpanExporter):
+    """Route spans to the run-local exporter registered for workflow.run_id."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._exporters: dict[str, SqliteJsonlExporter] = {}
+
+    def register_run(self, *, run_id: str, run_dir: Path) -> None:
+        with self._lock:
+            if run_id not in self._exporters:
+                self._exporters[run_id] = SqliteJsonlExporter(
+                    db_path=run_dir / "telemetry.db",
+                    jsonl_path=run_dir / "spans.jsonl",
+                )
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        grouped: dict[str, list[ReadableSpan]] = defaultdict(list)
+        for span in spans:
+            attrs = dict(span.attributes or {})
+            run_id = attrs.get(WORKFLOW_RUN_ID)
+            if isinstance(run_id, str) and run_id:
+                grouped[run_id].append(span)
+
+        with self._lock:
+            exports = [(self._exporters.get(run_id), run_spans) for run_id, run_spans in grouped.items()]
+
+        for exporter, run_spans in exports:
+            if exporter is not None:
+                result = exporter.export(run_spans)
+                if result is not SpanExportResult.SUCCESS:
+                    return result
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        with self._lock:
+            exporters = list(self._exporters.values())
+            self._exporters.clear()
+        for exporter in exporters:
+            exporter.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        with self._lock:
+            exporters = list(self._exporters.values())
+        return all(exporter.force_flush(timeout_millis) for exporter in exporters)
 
 
 def _jsonable(obj):

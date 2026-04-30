@@ -194,7 +194,72 @@ def test_graph_spec_converts_to_metadata():
     metadata = graph_spec_to_metadata(load_graph_spec("linear_rag"))
     assert metadata.name == "linear_rag"
     assert metadata.entry == "query_analyser"
-    assert metadata.nodes["retriever"].kind == "retriever"
+    assert metadata.nodes["query_embedding"].kind == "embedding"
+    assert metadata.nodes["vector_retriever"].kind == "vector_retriever"
+
+
+def test_compile_groups_multi_parent_join_edges(monkeypatch):
+    from backend.builder import compile as compile_module
+    from backend.builder.nodes import LLMNodeConfig
+
+    class _FakeStateGraph:
+        added_edges = []
+
+        def __init__(self, _state_type):
+            self.nodes = {}
+
+        def add_node(self, node_id, node):
+            self.nodes[node_id] = node
+
+        def set_entry_point(self, entry):
+            self.entry = entry
+
+        def add_edge(self, source, target):
+            self.added_edges.append((source, target))
+
+        def add_conditional_edges(self, *_args, **_kwargs):
+            raise AssertionError("not expected")
+
+    monkeypatch.setattr(compile_module, "StateGraph", _FakeStateGraph)
+    metadata = graph_spec_to_metadata(
+        GraphSpec.model_validate(
+            {
+                "name": "join_test",
+                "budget": {"cost_usd": 0.1, "latency_ms": 1000},
+                "entry": "start",
+                "nodes": [
+                    {
+                        "id": node_id,
+                        "kind": "llm",
+                        "model": "m",
+                        "system_prompt": "s",
+                        "user_prompt_template": "{user_input}",
+                        "output_state_key": node_id,
+                    }
+                    for node_id in ("start", "a", "b", "c", "join")
+                ],
+                "edges": [
+                    {"from": "start", "to": "a"},
+                    {"from": "start", "to": "b"},
+                    {"from": "start", "to": "c"},
+                    {"from": "a", "to": "join"},
+                    {"from": "b", "to": "join"},
+                    {"from": "c", "to": "join"},
+                    {"from": "join", "to": END},
+                ],
+            }
+        )
+    )
+
+    _FakeStateGraph.added_edges = []
+    compile_module.compile_to_langgraph(
+        metadata,
+        node_factory=lambda cfg, _metadata: (lambda state: state),
+        gate_router_factory=lambda *_args: (lambda _state: END),
+        router_dispatch_factory=lambda *_args: (lambda _state: END),
+        approval_dispatch_factory=lambda *_args: (lambda _state: END),
+    )
+    assert (["a", "b", "c"], "join") in _FakeStateGraph.added_edges
 
 
 def test_missing_workflow_metadata_requires_yaml_spec():
@@ -218,15 +283,17 @@ def test_canonical_yaml_workflow_shapes():
             "entry": "query_analyser",
             "nodes": {
                 "query_analyser": "llm",
-                "retriever": "retriever",
+                "query_embedding": "embedding",
+                "vector_retriever": "vector_retriever",
                 "reranker": "llm",
                 "synthesiser": "llm",
             },
             "edges": [
-                ("query_analyser", "retriever"),
+                ("query_analyser", "query_embedding"),
+                ("query_embedding", "vector_retriever"),
                 ("reranker", "synthesiser"),
-                ("retriever", "reranker"),
                 ("synthesiser", END),
+                ("vector_retriever", "reranker"),
             ],
             "loops": [],
         },

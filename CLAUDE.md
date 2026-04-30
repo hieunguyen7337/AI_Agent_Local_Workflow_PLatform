@@ -25,6 +25,7 @@ Read these files before broad exploration:
 - `README.md` - user-facing setup and capabilities.
 - `docs/ui_vision_audit.md` - UI smoke checklist.
 - `docs/run_artifacts.md` - how run files should be understood.
+- `docs/session_handoff_2026-04-30-p3.md` - latest session handoff: pipeline bug fixes (WorkflowState keys, parse postprocessor), weighted RRF, Jaccard attribute scoring, attribute-enriched final ranker, and new eval baseline mAP=34.5%.
 
 Do not spend tokens re-reading `claude_full_plan.md` unless investigating M1 history. It is old context, not the current source of truth.
 
@@ -85,7 +86,9 @@ Open `http://127.0.0.1:5173`.
 
 ## Next Milestone
 
-Use `FUTURE_SCOPE.md` as the authority. The current shipped baseline includes nested approval subgraphs, approval subgraph eval coverage, structured run artifacts, a workflow library selector driven by `GET /api/workflows` with metadata, validation health, source paths, and static graph facts, YAML-native reusable workflow templates copied through an audited human-confirmed flow, convention-first template placeholders such as `{user_input}` that are copied unchanged, read-only `template_parameters` metadata for expected inputs, and local template-copy ergonomics. The next milestone is workflow library quality signals beyond validation, focused on eval fixture presence and baseline freshness without latest run history.
+Use `FUTURE_SCOPE.md` as the authority. The current shipped baseline (M5.21) includes nested approval subgraphs, approval subgraph eval coverage, structured run artifacts, a workflow library selector driven by `GET /api/workflows` with metadata, validation health, source paths, static graph facts, and static eval quality signals, YAML-native reusable workflow templates, convention-first template placeholders, read-only `template_parameters` metadata, a workflow-as-function runtime (`backend.runtime.run_workflow_function`), ordered bounded batch calls via `run_workflow_batch` / `/api/workflows/{workflow}/batch-run` with default concurrency 50, run-routed telemetry, generalized dataset eval adapters, `python_tool` nodes calling allowlisted local Python functions (`python_tools.yaml`), the `person_reid_market1501` concept demo, and a fixed + improved eval pipeline for it: weighted RRF (`rrf_precompute` node, attribute weight=10), LLM output parser (`parse_final_ranking` node with regex fallback), Jaccard token-overlap attribute scoring, and attribute-enriched final ranker. Verified eval baseline: mAP=34.5%, CMC@1/5/10=35% on 100-query/500-gallery partition.
+
+The next milestone is **real specialist model wrappers for person reID**: replacing the three placeholder `python_tool` specialists with real implementations (TransReID/ViT for visual, CLIP/SigLIP for text, HMR2.0/SMPLify for body shape). Prerequisites: multimodal image input strategy, heavyweight model dependency choices, and a real candidate gallery as a vector index.
 
 Do not start any new milestone by guessing. Read `FUTURE_SCOPE.md` and the relevant runtime/spec/frontend paths before designing.
 

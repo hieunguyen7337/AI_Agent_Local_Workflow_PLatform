@@ -22,6 +22,7 @@ from backend.runtime.errors import BuilderValidationError
 
 from .nodes import (
     ApprovalNodeConfig,
+    EmbeddingNodeConfig,
     GateNodeConfig,
     LLMNodeConfig,
     LoopConfig,
@@ -30,6 +31,7 @@ from .nodes import (
     RouterNodeConfig,
     SubgraphNodeConfig,
     TesterNodeConfig,
+    VectorRetrieverNodeConfig,
 )
 from .validation import assert_no_cycle, assert_node_exists
 
@@ -215,8 +217,10 @@ __all__ = [
     "GraphBuilder",
     "GraphMetadata",
     "ApprovalNodeConfig",
+    "EmbeddingNodeConfig",
     "LLMNodeConfig",
     "RetrieverNodeConfig",
+    "VectorRetrieverNodeConfig",
     "TesterNodeConfig",
     "GateNodeConfig",
     "RouterNodeConfig",

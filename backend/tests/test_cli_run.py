@@ -7,7 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 import backend.cli.main as cli_main
-from backend.runtime.executor import RunResult
+from backend.runtime.functions import WorkflowFunctionResult
 
 
 def test_run_passes_test_code_file_and_prints_tester_mode(monkeypatch, tmp_path: Path):
@@ -15,14 +15,13 @@ def test_run_passes_test_code_file_and_prints_tester_mode(monkeypatch, tmp_path:
     test_file = tmp_path / "tests.py"
     test_file.write_text("assert add(1,2)==3", encoding="utf-8")
 
-    def _fake_load(workflow: str):
-        return object()
-
-    def _fake_run_graph(metadata, **kwargs):
-        captured.update(kwargs)
-        return RunResult(
+    def _fake_run_workflow_function(workflow, input_state, **kwargs):
+        captured["workflow"] = workflow
+        captured["input_state"] = input_state
+        captured["kwargs"] = kwargs
+        return WorkflowFunctionResult(
             run_id="r1",
-            graph_name="g",
+            workflow=workflow,
             final_state={"tester_verdict": True, "tester_mode": "sandbox"},
             status="ok",
             error=None,
@@ -31,8 +30,7 @@ def test_run_passes_test_code_file_and_prints_tester_mode(monkeypatch, tmp_path:
             run_dir=Path("runs") / "r1",
         )
 
-    monkeypatch.setattr(cli_main, "_load_workflow_metadata", _fake_load)
-    monkeypatch.setattr(cli_main, "run_graph", _fake_run_graph)
+    monkeypatch.setattr(cli_main, "run_workflow_function", _fake_run_workflow_function)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -47,19 +45,18 @@ def test_run_passes_test_code_file_and_prints_tester_mode(monkeypatch, tmp_path:
         ],
     )
     assert result.exit_code == 0
-    assert captured["initial_state_overrides"]["_test_code"] == "assert add(1,2)==3"
+    assert captured["workflow"] == "coder_tester"
+    assert captured["input_state"]["_test_code"] == "assert add(1,2)==3"
+    assert captured["input_state"]["user_input"] == "write add"
     payload = json.loads(result.stdout)
     assert payload["tester_mode"] == "sandbox"
 
 
 def test_run_cancelled_exits_130(monkeypatch):
-    def _fake_load(workflow: str):
-        return object()
-
-    def _fake_run_graph(metadata, **kwargs):
-        return RunResult(
+    def _fake_run_workflow_function(workflow, input_state, **kwargs):
+        return WorkflowFunctionResult(
             run_id="r1",
-            graph_name="g",
+            workflow=workflow,
             final_state={"tester_verdict": False, "tester_mode": "llm_judge"},
             status="cancelled",
             error="user_cancelled",
@@ -68,8 +65,7 @@ def test_run_cancelled_exits_130(monkeypatch):
             run_dir=Path("runs") / "r1",
         )
 
-    monkeypatch.setattr(cli_main, "_load_workflow_metadata", _fake_load)
-    monkeypatch.setattr(cli_main, "run_graph", _fake_run_graph)
+    monkeypatch.setattr(cli_main, "run_workflow_function", _fake_run_workflow_function)
 
     runner = CliRunner()
     result = runner.invoke(cli_main.app, ["run", "coder_tester", "--input", "write add"])

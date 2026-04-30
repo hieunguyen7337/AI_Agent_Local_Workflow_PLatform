@@ -2,7 +2,7 @@
 
 YAML `GraphSpec` files in `workflows/*.yaml` remain the only workflow authoring surface. Do not add a JSON index, Python workflow module, or separate manifest to organize the library.
 
-The library is discovered from the flat workflow directory. `GET /api/workflows` returns `id`, `name`, `description`, `category`, `tags`, `template`, validation health, source path, and static graph facts; the frontend selector groups by category and filters locally across those fields.
+The library is discovered from the flat workflow directory. `GET /api/workflows` returns `id`, `name`, `description`, `category`, `tags`, `template`, validation health, source path, static graph facts, and static eval quality signals; the frontend selector groups by category and filters locally across those fields.
 
 ## File Layout
 
@@ -53,7 +53,22 @@ Workflow summaries include static health fields:
 - `source_path` - the local YAML file path under the workflow root.
 - `facts` - node, edge, loop, approval-node, and subgraph-node counts.
 
-Invalid specs remain listed so contributors can find and repair them. Health does not include eval fixture presence, baseline freshness, or latest run status; those are runtime/evaluation quality signals, not source-library discovery metadata.
+Invalid specs remain listed so contributors can find and repair them. Health does not include latest run status because that mixes runtime history into source-library discovery metadata.
+
+## Eval Quality Signals
+
+Workflow summaries also include static eval quality fields derived from `evals/<workflow>/`:
+
+- `fixture_status` - `present`, `missing`, or `invalid` for `fixtures.yaml`.
+- `fixture_count` - number of fixtures loaded through the existing fixture loader.
+- `fixture_errors` - parse or validation errors for broken fixtures or baselines.
+- `baseline_status` - `fresh`, `missing`, `stale`, `invalid`, or `not_applicable` for `baseline.json`.
+- `baseline_updated_at` - local baseline file mtime in nanoseconds when available.
+- `stale_reasons` - why a baseline is older than the workflow spec or fixtures.
+
+A baseline is fresh only when `baseline.json` exists, parses as JSON, matches the workflow id when it declares one, and is newer than both `workflows/<workflow>.yaml` and `evals/<workflow>/fixtures.yaml`.
+
+These signals are read-only library metadata. They do not inspect latest runs, run evals, update baselines, or write any files. Missing or invalid fixtures make baseline status `not_applicable`.
 
 ## Templates
 

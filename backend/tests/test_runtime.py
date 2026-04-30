@@ -25,6 +25,7 @@ from backend.graphspec import graph_spec_to_metadata, load_graph_spec
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
 from backend.runtime.artifacts import resolve_run_dir
+from backend.runtime.nodes.llm import make_llm_node
 
 
 class _Replies:
@@ -64,6 +65,55 @@ def _build(max_iter: int = 3) -> GraphBuilder:
     b.add_edge("tester", "gate")
     b.add_loop("gate", "coder", max_iterations=max_iter)
     return b
+
+
+def test_llm_node_without_image_inputs_sends_text_content(monkeypatch):
+    captured: dict = {}
+
+    def _reply(_provider, **kwargs):
+        captured["messages"] = kwargs["messages"]
+        return LLMResponse(text="ok", usage=Usage(1, 1), model=kwargs["model"])
+
+    monkeypatch.setattr("backend.runtime.nodes.llm.stream_provider", _reply)
+    cfg = LLMNodeConfig(
+        id="answer",
+        model="minimax/minimax-m2.7",
+        system_prompt="system",
+        user_prompt_template="Task: {user_input}",
+        output_state_key="answer",
+    )
+    node = make_llm_node(cfg, run_id="run1", graph_name="graph", on_cost=lambda _cost: None)
+
+    assert node({"user_input": "hello"}) == {"answer": "ok"}
+    assert captured["messages"][1]["content"] == "Task: hello"
+
+
+def test_llm_node_with_image_inputs_sends_base64_image_part(monkeypatch, tmp_path: Path):
+    image_path = tmp_path / "query.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    captured: dict = {}
+
+    def _reply(_provider, **kwargs):
+        captured["messages"] = kwargs["messages"]
+        return LLMResponse(text="ok", usage=Usage(1, 1), model=kwargs["model"])
+
+    monkeypatch.setattr("backend.runtime.nodes.llm.stream_provider", _reply)
+    cfg = LLMNodeConfig(
+        id="vision",
+        model="qwen/qwen3-vl-8b-instruct",
+        system_prompt="system",
+        user_prompt_template="Inspect {user_input}",
+        output_state_key="answer",
+        image_inputs=[{"state_key": "query_image_path", "detail": "low"}],
+    )
+    node = make_llm_node(cfg, run_id="run2", graph_name="graph", on_cost=lambda _cost: None)
+
+    assert node({"user_input": "q1", "query_image_path": str(image_path)}) == {"answer": "ok"}
+    content = captured["messages"][1]["content"]
+    assert content[0] == {"type": "text", "text": "Inspect q1"}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["detail"] == "low"
+    assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
 def test_happy_path_passes_gate(monkeypatch, tmp_runs_root):

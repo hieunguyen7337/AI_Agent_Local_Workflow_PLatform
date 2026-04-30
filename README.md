@@ -1,7 +1,7 @@
-# Local AI Workflow Platform - M5.15
+# Local AI Workflow Platform - M5.19
 
 A local-first platform to author, run, visualize, and iterate on AI workflows.
-M5.15 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, a searchable category-grouped workflow library selector with validation health signals, and YAML-native reusable workflow templates with read-only parameter metadata and copy ergonomics:
+M5.19 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, a searchable category-grouped workflow library selector with validation and eval quality signals, YAML-native reusable workflow templates with read-only parameter metadata and copy ergonomics, a workflow-as-function Python runtime, batch execution for multiple inputs, and parallelized fixture/dataset evals:
 
 ## Vision
 
@@ -20,11 +20,11 @@ Each workflow should be built from a simple source-of-truth file that is easy fo
 
 - Authoring: YAML workflow specs (`workflows/*.yaml`) backed by Pydantic `GraphSpec` (`backend/graphspec/`)
 - Compiler helper: typed Python builder (`backend/builder/`) is an internal metadata/compiler layer, not a workflow authoring surface
-- Runtime: LangGraph `StateGraph` + SQLite checkpointing
+- Runtime: LangGraph `StateGraph` + SQLite checkpointing, with `backend.runtime.run_workflow_function` for single reusable calls and `backend.runtime.run_workflow_batch` for ordered multi-input calls
 - Telemetry: OpenTelemetry-style span export to SQLite + JSONL
 - Budget: cost + latency enforcement after a node completes and before the next node dispatches
 - Tester: sandboxed Python execution (timeout/output guardrails) with LLM-judge fallback when no test code is provided
-- Evals: YAML fixtures -> Nx runs -> metrics JSON + confidence intervals + baseline regression checks
+- Evals: YAML fixtures or local CSV/JSONL/YAML datasets -> runs -> metrics JSON + confidence intervals + baseline regression checks where applicable
 - UI: FastAPI + React Flow topology + Inspect/Run/Improve/Recover workbench + proposal review/eval/apply + template copy + approval workbench + run list/detail + telemetry overlays + searchable category-grouped workflow selector + WebSocket live updates
 - Providers: OpenRouter and direct OpenAI
 - Workflow defaults: `coder_tester` -> OpenRouter `minimax/minimax-m2.7`; `linear_rag`, `supervisor_loop`, and `dispatch_aggregate` -> OpenAI `gpt-4o-mini`
@@ -73,7 +73,7 @@ npm install
 cd ..
 ```
 
-## Verify M5.15 End-to-End
+## Verify M5.19 End-to-End
 
 From repo root (Windows commands shown):
 
@@ -150,6 +150,7 @@ Expected status is `pending_approval`; the parent run writes `pending_subgraph_a
 ```
 `coder_tester` eval fixtures include executable `test_code`, so evals run sandbox mode by default. `approval_review` and `approval_subgraph_wrapper` fixtures include approval decisions so evals can drive the full pause/decide/resume cycle without live human input.
 `rag_subgraph_wrapper` fixtures score mapped `rag_answer` output and preserve parent/child lineage in eval results.
+Fixture evals default to `--max-concurrency 50`; use a lower value when a workflow or provider needs throttling.
 
 9. Optional baseline workflow:
 
@@ -206,6 +207,48 @@ Expected status is `pending_approval`; the parent run writes `pending_subgraph_a
 .\.venv\Scripts\python -m backend.cli.main eval coder_tester --n 4
 ```
 
+13. Call a workflow as a local Python function:
+
+```powershell
+@'
+from backend.runtime import run_workflow_function
+
+result = run_workflow_function(
+    "linear_rag",
+    {"user_input": "What is the refund window for Nimbus Cloud subscriptions?"},
+)
+print(result.status)
+print(result.final_state.get("final_answer"))
+print(result.run_dir)
+'@ | .\.venv\Scripts\python -
+```
+
+13b. Call a workflow for multiple inputs:
+
+```powershell
+@'
+from backend.runtime import WorkflowBatchItem, run_workflow_batch
+
+results = run_workflow_batch(
+    "linear_rag",
+    [
+        WorkflowBatchItem(id="a", input_state={"user_input": "What is the refund window?"}),
+        WorkflowBatchItem(id="b", input_state={"user_input": "How do upgrades work?"}),
+    ],
+    max_concurrency=2,
+)
+for item in results:
+    print(item.id, item.status, item.run_id)
+'@ | .\.venv\Scripts\python -
+```
+
+14. Run a generalized local dataset eval:
+
+```powershell
+.\.venv\Scripts\python -m backend.cli.main eval-dataset linear_rag --config evals\linear_rag\dataset_eval.yaml
+```
+Dataset evals default to `max_concurrency: 50` from the config unless overridden with `--max-concurrency <n>`.
+
 ## Run Backend + Frontend Locally
 
 Open two terminals.
@@ -227,7 +270,7 @@ npm run dev
 Open `http://127.0.0.1:5173`.
 
 Expected behavior:
-- workflow selector populates dynamically from `GET /api/workflows`; any `.yaml` file added to `workflows/` appears without touching frontend code; workflows are grouped by `category`, searchable by metadata, template status, parameter count, and validation errors, and summarized with valid/invalid counts plus selected-workflow graph facts
+- workflow selector populates dynamically from `GET /api/workflows`; any `.yaml` file added to `workflows/` appears without touching frontend code; workflows are grouped by `category`, searchable by metadata, template status, parameter count, validation errors, fixture status, and baseline status, and summarized with valid/invalid counts plus fixture-ready/fresh-baseline counts and selected-workflow graph facts
 - template workflows are marked in the selector and health line; selecting `simple_llm_template` shows a human-confirmed Copy template form in Inspect with expected inputs, local id validation, duplicate-id feedback, and a reminder that prompt placeholders are copied unchanged
 - graph renders for selected workflow
 - selecting a graph node opens source metadata in the inspector
@@ -282,13 +325,51 @@ Expected behavior:
 - Canonical editable specs live in [workflows](workflows).
 - Specs are parsed by [backend/graphspec](backend/graphspec), validated as `GraphSpec`, and adapted to the existing runtime `GraphMetadata`.
 - CLI, eval, replay, and API loading use YAML specs only.
-- `/api/workflows` returns `[{id, name, description, category, tags, template, template_parameter_count, validation_status, validation_errors, source_path, facts}]` for every `.yaml` file in `workflows/`; the frontend selector is fully API-driven, searchable, grouped by category, and shows validation health.
+- `/api/workflows` returns `[{id, name, description, category, tags, template, template_parameter_count, validation_status, validation_errors, source_path, facts, eval_quality}]` for every `.yaml` file in `workflows/`; the frontend selector is fully API-driven, searchable, grouped by category, and shows validation plus static eval quality health.
+- `eval_quality` is derived from `evals/<workflow>/fixtures.yaml` and `evals/<workflow>/baseline.json`. It reports fixture presence/count/errors and baseline freshness by comparing local file mtimes against the workflow spec and fixtures. It never reads latest runs, runs evals, updates baselines, or writes files.
 - `POST /api/workflows/{workflow}/copy-template` copies a valid `template: true` workflow into a new canonical YAML spec after explicit confirmation. The UI blocks invalid or already-known target ids before submit; the backend remains the write authority. The new spec validates through `GraphSpec`, is written with `template: false`, clears `template_parameters`, preserves prompt/state placeholders such as `{user_input}` unchanged, and records `runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json`.
+- `POST /api/workflows/{workflow}/batch-run` accepts multiple `{id?, input_state, expected?}` items plus `max_concurrency`, runs them through the public workflow-function boundary, and returns ordered per-item status, final state, run id, run directory, error, cost, and latency.
 - `/api/graph/{workflow}` returns topology plus full node metadata so the frontend can show both graph shape and node configuration.
 - `/api/spec/{workflow}` returns raw YAML plus validated `GraphSpec` JSON.
 - `/api/approvals?status=pending|decided|all` returns approval artifacts discovered under structured workflow run directories, with decision metadata when present.
 - YAML is the human/LLM editing format. Pydantic `GraphSpec` is the trusted contract.
 - Workflow library conventions, recommended categories, template placeholder/parameter conventions, and deferred subdirectory guidance are documented in [docs/workflow_library.md](docs/workflow_library.md).
+
+## Workflow-As-Function Runtime
+
+Use `backend.runtime.run_workflow_function(workflow_id, input_state)` when Python code needs to call a YAML workflow as a reusable local function. It accepts a full workflow state mapping, or a plain string as `user_input` compatibility, and returns `status`, `final_state`, `run_id`, `run_dir`, `error`, `cost_usd`, and `latency_ms`.
+
+The function reuses the same YAML loading, `GraphSpec` validation, LangGraph execution, approvals, subgraphs, telemetry, and artifact writing as CLI/API runs. It does not add arbitrary Python tool execution or a second authoring format.
+
+Use `backend.runtime.run_workflow_batch(workflow_id, items, max_concurrency=50)` for multiple inputs. Results preserve input order, each item writes an isolated normal run artifact directory, and item failures are captured in that item result so other inputs can continue. Telemetry uses one process-wide tracer with run-id routing so concurrent runs keep separate `telemetry.db` and `spans.jsonl` files. `run_graph` remains the low-level executor for compiled metadata, proposal evals, replay, approval continuation internals, subgraph internals, and low-level runtime tests.
+
+## Generalized Dataset Evals
+
+Use `evals/<workflow>/dataset_eval.yaml` to run a workflow against a local CSV, JSONL, or YAML dataset through explicit row-to-state mappings and built-in scorers. The dataset path is resolved relative to the config file.
+
+Example:
+
+```yaml
+dataset_path: dataset.yaml
+dataset_format: yaml
+input_mapping:
+  user_input: question
+  _expected: expected
+  artifacts.row_id: id
+scorers:
+  - id: final_answer_contains_expected
+    type: substring
+    actual: final_state.final_answer
+    expected: row.expected
+```
+
+Run it with:
+
+```powershell
+.\.venv\Scripts\python -m backend.cli.main eval-dataset <workflow> --config evals\<workflow>\dataset_eval.yaml
+```
+
+Dataset evals support `exact`, `substring`, `boolean`, and `numeric_threshold` scorers. They use `run_workflow_batch` for row execution, preserve dataset row order, continue after per-row failures, and write results under `runs/dataset_eval_<workflow>_<timestamp>/eval.json`.
 
 ## Workbench Inspection And Proposal Review
 
@@ -431,11 +512,12 @@ runs/spec_audit/<workflow>/<timestamp>/original.yaml
 runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json
 ```
 
-## M5.15 Limits (by design)
+## M5.19 Limits (by design)
 
 - Seven reference workflows plus one copyable starter template; the selector is dynamic so new `.yaml` files appear automatically and are grouped by YAML `category`
 - Workflow specs remain flat under `workflows/*.yaml`; subdirectories and path-like workflow ids are deferred until category/tag navigation is insufficient
-- Workflow library health is static YAML validation plus graph facts only; eval fixture readiness, baseline freshness, and latest run history are deferred
+- Workflow library health is static YAML validation, graph facts, eval fixture readiness, and baseline freshness only; latest run history and automatic eval repair actions are deferred
+- Workflow-as-function supports local Python calls and bounded local batch calls into existing YAML workflows; fixture, dataset, and batch API calls default to local concurrency 50 with run-routed telemetry, but distributed workers, queues, run-history jobs, provider-specific throttling, external Python tool nodes, and arbitrary Python scorers are still deferred
 - Templates are normal executable YAML workflows marked with `template: true`; `template_parameters` are read-only guidance, copy clears them, local validation only improves ergonomics, and parameter substitution plus runtime input enforcement are deferred
 - Two direct providers only (`openrouter`, `openai`)
 - YAML workflow specs are the editable source of truth; legacy Python workflow modules are no longer a runtime fallback

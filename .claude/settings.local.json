@@ -9,7 +9,10 @@
       "Bash(python -c ' *)",
       "Bash(python -m backend.cli.main --help)",
       "Bash(python -m backend.cli.main export-mermaid coder_tester)",
-      "Bash(python -m pytest backend/tests -q)"
+      "Bash(python -m pytest backend/tests -q)",
+      "Bash(.\\\\.venv\\\\Scripts\\\\python -m pytest backend\\\\tests\\\\test_dataset_eval.py -q)",
+      "Bash(.venv/Scripts/python -m pytest backend/tests/test_dataset_eval.py -q)",
+      "Read(//c/Users/Admin/**)"
     ]
   }
 }

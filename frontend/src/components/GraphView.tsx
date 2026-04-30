@@ -70,11 +70,23 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
       border: "1px solid #fca5a5",
     },
   });
-  topology.nodes.forEach((n) =>
-    pushNode(n.id, n.name || n.id, n.kind, {
+  topology.nodes.forEach((n) => {
+    const extra: Partial<Node<BaseNodeData>> = {
       data: { id: n.id, name: n.name || n.id, kind: n.kind, metadata: n.metadata },
-    })
-  );
+    };
+    if (n.kind === "python_tool") {
+      extra.style = {
+        width: NODE_W,
+        height: NODE_H,
+        borderRadius: 8,
+        border: "1px solid #5eead4",
+        padding: 10,
+        background: "#f0fdfa",
+        fontSize: 13,
+      };
+    }
+    pushNode(n.id, n.name || n.id, n.kind, extra);
+  });
 
   const rfEdges: Edge[] = [
     { id: "start->entry", source: "START", target: topology.entry, type: "smoothstep" },
@@ -108,6 +120,12 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
       metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
     ].filter(Boolean);
   }
+  if (kind === "embedding") {
+    return [
+      [metadata.provider, metadata.model].filter(Boolean).join(" / "),
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+    ].filter(Boolean);
+  }
   if (kind === "tester") {
     return [
       metadata.execution_mode ? `mode: ${String(metadata.execution_mode)}` : "",
@@ -117,6 +135,12 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
   if (kind === "retriever") {
     return [
       metadata.corpus_path ? `corpus: ${String(metadata.corpus_path)}` : "",
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "vector_retriever") {
+    return [
+      metadata.index_path ? `index: ${String(metadata.index_path)}` : "",
       metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
     ].filter(Boolean);
   }
@@ -141,6 +165,14 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
       metadata.workflow ? `workflow: ${String(metadata.workflow)}` : "",
       metadata.inputs ? `inputs: ${Object.keys(metadata.inputs as Record<string, unknown>).length}` : "",
       metadata.outputs ? `outputs: ${Object.keys(metadata.outputs as Record<string, unknown>).length}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "python_tool") {
+    const inputKeys = metadata.inputs ? Object.keys(metadata.inputs as Record<string, unknown>) : [];
+    return [
+      metadata.callable_path ? `fn: ${String(metadata.callable_path).split(".").slice(-2).join(".")}` : "",
+      inputKeys.length > 0 ? `in: ${inputKeys.join(", ")}` : "",
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
     ].filter(Boolean);
   }
   return [];

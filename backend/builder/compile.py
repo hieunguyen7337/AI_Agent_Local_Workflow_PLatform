@@ -1,6 +1,7 @@
 """Compile a GraphMetadata into a LangGraph StateGraph."""
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Callable
 
 from langgraph.graph import END as LG_END
@@ -46,10 +47,19 @@ def compile_to_langgraph(
         for nid, cfg in metadata.nodes.items()
         if isinstance(cfg, (ApprovalNodeConfig, GateNodeConfig, RouterNodeConfig))
     }
+    edges_by_target: dict[str, list[str]] = defaultdict(list)
     for source, target in metadata.edges:
         if source in conditional_ids:
             continue
-        g.add_edge(source, _map_end(target))
+        edges_by_target[target].append(source)
+
+    for target, sources in edges_by_target.items():
+        mapped_target = _map_end(target)
+        if len(sources) == 1 or mapped_target == LG_END:
+            for source in sources:
+                g.add_edge(source, mapped_target)
+        else:
+            g.add_edge(sources, mapped_target)
 
     for loop in metadata.loops:
         src_cfg = metadata.nodes.get(loop.back_edge_from)

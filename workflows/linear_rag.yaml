@@ -22,11 +22,20 @@ nodes:
       {user_input}
     output_state_key: query_analysis
     temperature: 0.0
-  - id: retriever
-    kind: retriever
-    corpus_path: evals/linear_rag/corpus.yaml
-    query_state_key: query_analysis
+  - id: query_embedding
+    kind: embedding
+    provider: openrouter
+    model: google/gemini-embedding-2-preview
+    input_template: |-
+      {query_analysis}
+    output_state_key: query_embedding
+    dimensions: 768
+  - id: vector_retriever
+    kind: vector_retriever
+    index_path: evals/linear_rag/vector_index.sqlite
+    query_embedding_state_key: query_embedding
     output_state_key: retrieved_context
+    id_output_state_key: retrieved_vector_doc_ids
     top_k: 2
   - id: reranker
     kind: llm
@@ -62,8 +71,10 @@ nodes:
     temperature: 0.0
 edges:
   - from: query_analyser
-    to: retriever
-  - from: retriever
+    to: query_embedding
+  - from: query_embedding
+    to: vector_retriever
+  - from: vector_retriever
     to: reranker
   - from: reranker
     to: synthesiser

@@ -13,14 +13,17 @@ from backend.builder.api import GraphMetadata
 from backend.builder.compile import compile_to_langgraph
 from backend.builder.nodes import (
     ApprovalNodeConfig,
+    EmbeddingNodeConfig,
     GateNodeConfig,
     LLMNodeConfig,
     LoopConfig,
     NodeConfig,
+    PythonToolNodeConfig,
     RetrieverNodeConfig,
     RouterNodeConfig,
     SubgraphNodeConfig,
     TesterNodeConfig,
+    VectorRetrieverNodeConfig,
 )
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.artifacts import make_run_id, run_dir_for_id, write_run_manifest
@@ -34,12 +37,15 @@ from backend.runtime.errors import (
     WorkflowError,
 )
 from backend.runtime.nodes.approval import make_approval_dispatcher, make_approval_node
+from backend.runtime.nodes.embedding import make_embedding_node
 from backend.runtime.nodes.gate import make_gate_passthrough, make_gate_router
 from backend.runtime.nodes.llm import make_llm_node
+from backend.runtime.nodes.python_tool import make_python_tool_node
 from backend.runtime.nodes.retriever import make_retriever_node
 from backend.runtime.nodes.router import make_router_dispatcher, make_router_passthrough
 from backend.runtime.nodes.subgraph import make_subgraph_node
 from backend.runtime.nodes.tester import make_tester_node
+from backend.runtime.nodes.vector_retriever import make_vector_retriever_node
 from backend.runtime.state import WorkflowState, new_state
 from backend.telemetry.exporter import record_run_end, record_run_start
 from backend.telemetry.genai_attrs import (
@@ -95,6 +101,14 @@ def _node_factory(
                 on_cost=_on_cost,
                 cancellation=cancellation,
             )
+        elif isinstance(cfg, EmbeddingNodeConfig):
+            base = make_embedding_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                on_cost=_on_cost,
+                cancellation=cancellation,
+            )
         elif isinstance(cfg, TesterNodeConfig):
             base = make_tester_node(
                 cfg,
@@ -105,6 +119,8 @@ def _node_factory(
             )
         elif isinstance(cfg, RetrieverNodeConfig):
             base = make_retriever_node(cfg, run_id=run_id, graph_name=graph_name)
+        elif isinstance(cfg, VectorRetrieverNodeConfig):
+            base = make_vector_retriever_node(cfg, run_id=run_id, graph_name=graph_name)
         elif isinstance(cfg, GateNodeConfig):
             loop = _find_loop(metadata, cfg.fail_target)
             return make_gate_passthrough(cfg, loop, run_id=run_id, graph_name=graph_name)
@@ -118,6 +134,13 @@ def _node_factory(
                 run_dir=run_dir,
                 runs_root=runs_root,
                 on_cost=_on_cost,
+            )
+        elif isinstance(cfg, PythonToolNodeConfig):
+            base = make_python_tool_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                cancellation=cancellation,
             )
         else:
             raise TypeError(f"Unknown node kind: {type(cfg).__name__}")
@@ -202,7 +225,7 @@ def run_graph(
     run_dir = run_dir_for_id(runs_root, metadata.name, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    tracer = init_tracer(run_dir)
+    tracer = init_tracer(run_dir, run_id=run_id)
 
     enforcer = BudgetEnforcer(
         cost_budget_usd=metadata.cost_budget_usd,

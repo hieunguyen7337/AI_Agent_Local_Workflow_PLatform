@@ -16,6 +16,8 @@ class WorkflowState(TypedDict, total=False):
     tester_feedback: str
     query_analysis: str
     retrieved_context: str
+    query_embedding: list[float]
+    retrieved_vector_doc_ids: list[str]
     reranked_context: str
     final_answer: str
     rag_answer: str
@@ -23,6 +25,8 @@ class WorkflowState(TypedDict, total=False):
     supervisor_route: str
     research_notes: str
     dispatch_brief: str
+    start_marker: str
+    fusion_weight_analysis: str
     specialist_a_notes: str
     specialist_b_notes: str
     retrieved_doc_ids: list[str]
@@ -33,6 +37,29 @@ class WorkflowState(TypedDict, total=False):
     nested_final_answer: str
     pending_subgraph_approval: dict[str, Any]
     _subgraph_resume: dict[str, Any]
+
+    query_id: str
+    query_image_path: str
+    query_db_path: str
+    query_embedding_db_path: str
+    gallery_db_path: str
+    gallery_embedding_db_path: str
+    retrieval_top_k: int
+    query_pid: int
+    query_camid: int
+    gallery_ids: list[str]
+    gallery_pids: list[int]
+    gallery_camids: list[int]
+    query_llm_attributes: dict[str, Any] | str
+    query_multimodal_embedding: list[float]
+    llm_attribute_ranked: list[str]
+    multimodal_embedding_ranked: list[str]
+    reid_multimodal_embedding_ranked: list[str]
+    rrf_merged_ranking: list[str]
+    reciprocal_rank_fused_ranking: list[str]
+    ranked_gallery_pids_raw: str
+    ranked_gallery_ids: list[str]
+    ranked_gallery_pids: list[str] | str
 
     iteration_counts: dict[str, int]
     cost_usd_accum: float
@@ -50,6 +77,8 @@ def new_state(user_input: str) -> WorkflowState:
         tester_feedback="",
         query_analysis="",
         retrieved_context="",
+        query_embedding=[],
+        retrieved_vector_doc_ids=[],
         reranked_context="",
         final_answer="",
         rag_answer="",
@@ -57,6 +86,8 @@ def new_state(user_input: str) -> WorkflowState:
         supervisor_route="",
         research_notes="",
         dispatch_brief="",
+        start_marker="",
+        fusion_weight_analysis="",
         specialist_a_notes="",
         specialist_b_notes="",
         retrieved_doc_ids=[],

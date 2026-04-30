@@ -9,24 +9,30 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from backend.builder.api import END
 from backend.builder.nodes import (
     ApprovalNodeConfig,
+    EmbeddingNodeConfig,
     GateNodeConfig,
     LLMNodeConfig,
+    PythonToolNodeConfig,
     RetrieverNodeConfig,
     RouterNodeConfig,
     SubgraphNodeConfig,
     TesterNodeConfig,
+    VectorRetrieverNodeConfig,
 )
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 GraphNodeSpec = Annotated[
     LLMNodeConfig
+    | EmbeddingNodeConfig
     | TesterNodeConfig
     | RetrieverNodeConfig
+    | VectorRetrieverNodeConfig
     | GateNodeConfig
     | RouterNodeConfig
     | ApprovalNodeConfig
-    | SubgraphNodeConfig,
+    | SubgraphNodeConfig
+    | PythonToolNodeConfig,
     Field(discriminator="kind"),
 ]
 
