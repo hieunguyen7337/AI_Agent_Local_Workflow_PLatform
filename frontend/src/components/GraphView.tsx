@@ -1,11 +1,11 @@
-﻿import { type ReactNode, useMemo } from "react";
-import ReactFlow, { Background, Controls, MiniMap, type Edge, type Node } from "reactflow";
+﻿import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import ReactFlow, { Background, Controls, MiniMap, type Edge, type Node, useNodesState } from "reactflow";
 import dagre from "@dagrejs/dagre";
 import "reactflow/dist/style.css";
 import type { NodeMetric, Topology } from "../types";
 
-const NODE_W = 220;
-const NODE_H = 148;
+const NODE_W = 240;
+const NODE_H = 176;
 
 type BaseNodeData = {
   id: string;
@@ -40,6 +40,8 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
       style: {
         width: NODE_W,
         height: NODE_H,
+        boxSizing: "border-box",
+        overflow: "hidden",
         borderRadius: 8,
         border: "1px solid #475569",
         padding: 10,
@@ -55,6 +57,8 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
     style: {
       width: NODE_W,
       height: NODE_H,
+      boxSizing: "border-box",
+      overflow: "hidden",
       borderRadius: 40,
       background: "#14532d",
       padding: 10,
@@ -66,6 +70,8 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
     style: {
       width: NODE_W,
       height: NODE_H,
+      boxSizing: "border-box",
+      overflow: "hidden",
       borderRadius: 40,
       background: "#7f1d1d",
       padding: 10,
@@ -81,6 +87,8 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
       extra.style = {
         width: NODE_W,
         height: NODE_H,
+        boxSizing: "border-box",
+        overflow: "hidden",
         borderRadius: 8,
         border: "1px solid #0ea5e9",
         padding: 10,
@@ -183,20 +191,35 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
 }
 
 function renderLabel(name: string, kind: string, metric?: NodeMetric, metadata?: Record<string, unknown>) {
+  if (kind === "entry" || kind === "exit") {
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center overflow-hidden text-center">
+        <div className="truncate text-base font-semibold leading-tight" title={name}>{name}</div>
+        <div className="mt-2 truncate text-xs leading-tight text-slate-300">{kind}</div>
+      </div>
+    );
+  }
+
   const hasData = metric != null && metric.invocations > 0;
   const lines = metadataLines(kind, metadata);
   return (
-    <div className="space-y-1" title={metadata ? JSON.stringify(metadata, null, 2) : undefined}>
-      <div className="font-semibold leading-tight">{name}</div>
-      <div className="text-xs text-slate-400">{kind}</div>
+    <div className="flex h-full min-h-0 flex-col gap-1 overflow-hidden" title={metadata ? JSON.stringify(metadata, null, 2) : undefined}>
+      <div
+        className="min-h-[32px] overflow-hidden font-semibold leading-tight"
+        style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
+        title={name}
+      >
+        {name}
+      </div>
+      <div className="flex-none truncate text-xs leading-tight text-slate-400">{kind}</div>
       {lines.length > 0 && (
-        <div className="text-[10px] leading-tight text-slate-400 font-mono truncate">
+        <div className="min-h-0 flex-1 overflow-hidden font-mono text-[10px] leading-tight text-slate-400">
           {lines.map((line) => (
             <div key={line} className="truncate">{line}</div>
           ))}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-1 text-[11px] mt-1">
+      <div className="mt-auto grid flex-none grid-cols-2 gap-0.5 text-[10px]">
         <Badge label="Fail %" value={hasData ? `${metric!.fail_pct.toFixed(1)}%` : "-"} />
         <Badge label="P95" value={hasData ? `${metric!.p95_latency_ms.toFixed(0)}ms` : "-"} />
         <Badge label="$/run" value={hasData ? `$${metric!.cost_per_run_usd.toFixed(4)}` : "-"} />
@@ -208,9 +231,9 @@ function renderLabel(name: string, kind: string, metric?: NodeMetric, metadata?:
 
 function Badge({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-slate-600 bg-slate-700 px-1.5 py-0.5">
-      <div className="text-[10px] text-slate-400 leading-none">{label}</div>
-      <div className="text-[11px] font-medium text-slate-300 leading-tight">{value}</div>
+    <div className="min-w-0 overflow-hidden rounded border border-slate-600 bg-slate-700 px-1 py-[1px]">
+      <div className="truncate text-[10px] leading-tight text-slate-400">{label}</div>
+      <div className="truncate text-[10px] font-medium leading-tight text-slate-300">{value}</div>
     </div>
   );
 }
@@ -227,6 +250,11 @@ export default function GraphView({
   onSelectNode?: (nodeId: string) => void;
 }) {
   const base = useMemo(() => layout(topology), [topology]);
+  const layoutKey = useMemo(
+    () => [topology.name, ...base.nodes.map((node) => node.id), ...base.edges.map((edge) => edge.id)].join("|"),
+    [base.edges, base.nodes, topology.name]
+  );
+  const layoutKeyRef = useRef<string>();
   const decoratedNodes = useMemo(
     () =>
       base.nodes.map((n) => {
@@ -242,15 +270,30 @@ export default function GraphView({
       }),
     [base.nodes, nodeMetrics, selectedNodeId]
   );
+  const [nodes, setNodes, onNodesChange] = useNodesState<BaseNodeData>(decoratedNodes);
+
+  useEffect(() => {
+    setNodes((currentNodes) => {
+      if (layoutKeyRef.current !== layoutKey) {
+        layoutKeyRef.current = layoutKey;
+        return decoratedNodes;
+      }
+      const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+      return decoratedNodes.map((node) => {
+        const current = currentById.get(node.id);
+        return current ? { ...node, position: current.position } : node;
+      });
+    });
+  }, [decoratedNodes, layoutKey, setNodes]);
 
   return (
     <div style={{ width: "100%", height: "100%", background: "#020617" }}>
       <ReactFlow
-        nodes={decoratedNodes}
+        nodes={nodes}
         edges={base.edges}
         fitView
         fitViewOptions={{ padding: 0.15 }}
-        nodesDraggable={false}
+        onNodesChange={onNodesChange}
         panOnDrag
         zoomOnScroll
         onNodeClick={(_event, node) => onSelectNode?.(node.id)}

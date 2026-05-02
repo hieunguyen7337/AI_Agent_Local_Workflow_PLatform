@@ -29,13 +29,13 @@ export default function ApprovalWorkbench({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="border-b border-slate-700 flex text-xs">
+      <div className="border-b border-slate-600 flex text-xs">
         {(["pending", "decided"] as ApprovalTab[]).map((item) => (
           <button
             key={item}
             type="button"
             className={[
-              "px-3 py-2 border-r border-slate-700 capitalize",
+              "px-3 py-2 border-r border-slate-600 capitalize",
               tab === item ? "bg-amber-900/30 text-amber-300 font-medium" : "bg-slate-900 text-slate-400",
             ].join(" ")}
             onClick={() => setTab(item)}

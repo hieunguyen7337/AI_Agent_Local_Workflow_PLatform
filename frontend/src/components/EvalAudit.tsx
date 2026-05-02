@@ -24,7 +24,7 @@ export default function EvalAudit({ workflow }: { workflow: string }) {
   }, [detail.data?.rows, query]);
 
   return (
-    <div className="border-b border-slate-700 bg-slate-900">
+    <div className="bg-slate-900">
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <div className="text-xs uppercase text-slate-400">Dataset eval audit</div>
         <select
@@ -54,7 +54,7 @@ export default function EvalAudit({ workflow }: { workflow: string }) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Filter rows by query id, pass/fail, node id, or error"
           />
-          <div className="max-h-44 overflow-auto rounded border border-slate-700">
+          <div className="min-h-[140px] max-h-[320px] overflow-auto rounded border border-slate-600">
             {filteredRows.map((row: any) => (
               <details key={`${row.row_index}-${row.run_id}`} className="border-b border-slate-700 p-2">
                 <summary className="cursor-pointer">

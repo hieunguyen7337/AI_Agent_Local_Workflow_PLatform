@@ -494,18 +494,18 @@ export default function SpecInspector({
 
   return (
     <div className="h-full flex flex-col bg-slate-950">
-      <div className="border-b border-slate-700 px-3 py-2">
+      <div className="border-b-2 border-slate-600 px-3 py-2">
         <div className="text-xs uppercase text-slate-400">{title}</div>
         <div className="text-sm font-semibold text-slate-100">{spec?.workflow ?? topology?.name ?? "-"}</div>
       </div>
       {tabs.length > 1 && (
-        <div className="border-b border-slate-700 flex text-xs">
+        <div className="border-b border-slate-600 flex text-xs">
           {tabs.map((item) => (
             <button
               key={item}
               type="button"
               className={[
-                "px-3 py-2 border-r border-slate-700 capitalize",
+                "px-3 py-2 border-r border-slate-600 capitalize",
                 tab === item ? "bg-slate-700 text-slate-100 font-medium" : "bg-slate-950 text-slate-400",
               ].join(" ")}
               onClick={() => onTabChange(item)}

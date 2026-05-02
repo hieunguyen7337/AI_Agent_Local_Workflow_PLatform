@@ -215,7 +215,7 @@ export default function App() {
       className="h-full grid"
       style={{ gridTemplateRows: "48px 1fr", gridTemplateColumns: "minmax(0, 1fr) minmax(480px, 520px)" }}
     >
-      <header className="col-span-2 border-b border-slate-700 flex items-center px-4 bg-slate-900 gap-3">
+      <header className="col-span-2 border-b-2 border-slate-600 flex items-center px-4 bg-slate-900 gap-3 overflow-hidden">
         <div className="font-semibold">Workflow Platform</div>
         <label className="text-sm text-slate-400">Workflow</label>
         <input
@@ -244,7 +244,10 @@ export default function App() {
           ))}
         </select>
         {workflows.data && (
-          <div className="min-w-0 text-xs text-slate-400">
+          <div
+            className="min-w-0 flex-1 truncate text-xs text-slate-400"
+            title={selectedWorkflowSummary ? workflowFactSummary(selectedWorkflowSummary) : undefined}
+          >
             <span className="font-medium text-slate-200">{workflowHealth.total}</span> workflows ·{" "}
             <span className="text-emerald-400">{workflowHealth.valid}</span> valid ·{" "}
             <span className={workflowHealth.invalid > 0 ? "text-red-400" : "text-slate-500"}>
@@ -272,7 +275,7 @@ export default function App() {
           </div>
         )}
       </header>
-      <div className="border-r min-w-0 h-full">
+      <div className="border-r-2 border-slate-600 min-w-0 h-full">
         {topo.isLoading && <div className="p-4 text-sm text-slate-400">Loading topology...</div>}
         {topo.error && <div className="p-4 text-sm text-red-400">Error loading topology. Is the backend running on :8000?</div>}
         {topo.data && (
@@ -289,7 +292,7 @@ export default function App() {
         )}
       </div>
       <aside className="flex flex-col h-full min-w-0 overflow-hidden">
-        <div className="border-b border-slate-700 bg-slate-900">
+        <div className="border-b-2 border-slate-600 bg-slate-900">
           <div className="px-3 py-2">
             <div className="text-xs uppercase text-slate-400">Workflow workbench</div>
             <div className="text-sm font-semibold text-slate-100">{workflow}</div>
@@ -302,13 +305,13 @@ export default function App() {
               </div>
             )}
           </div>
-          <div className="flex border-t border-slate-700 text-xs">
+          <div className="flex border-t border-slate-600 text-xs">
             {WORKBENCH_TABS.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 className={[
-                  "flex-1 border-r border-slate-700 px-3 py-2 text-center",
+                  "flex-1 border-r border-slate-600 px-3 py-2 text-center",
                   workbenchTab === item.id ? "bg-slate-700 font-medium text-slate-100" : "bg-slate-900 text-slate-400",
                 ].join(" ")}
                 onClick={() => {
@@ -355,16 +358,18 @@ export default function App() {
                   setSelectedRun(runId);
                 }}
               />
-                <div className="border-b min-h-[170px] max-h-[250px] overflow-y-auto flex flex-col">
-                  <div className="px-3 py-2 text-xs uppercase text-slate-400">Recent runs</div>
-                  <RunList workflow={workflow} onSelect={(r) => setSelectedRun(r.run_id)} selected={selectedRun} />
-                </div>
+              <div className="border-b border-slate-600 min-h-[170px] max-h-[250px] overflow-y-auto flex flex-col">
+                <div className="px-3 py-2 text-xs uppercase text-slate-400">Recent runs</div>
+                <RunList workflow={workflow} onSelect={(r) => setSelectedRun(r.run_id)} selected={selectedRun} />
+              </div>
+              <div className="border-b border-slate-600 min-h-[200px] flex-none overflow-y-auto">
                 <EvalAudit workflow={workflow} />
-                <div className="border-b h-[240px] flex-none overflow-y-auto">
+              </div>
+              <div className="border-b border-slate-600 h-[240px] flex-none overflow-y-auto">
                 <div className="px-3 py-2 text-xs uppercase text-slate-400">Approvals</div>
                 <ApprovalWorkbench onSelectRun={setSelectedRun} selectedRun={selectedRun} />
               </div>
-              <div className="flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 min-h-[120px] overflow-y-auto">
                 {selectedRun ? (
                   <RunDetail runId={selectedRun} onSelectRun={setSelectedRun} />
                 ) : (
