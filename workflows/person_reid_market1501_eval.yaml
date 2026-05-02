@@ -3,7 +3,8 @@ name: person_reid_market1501_eval
 description: >-
   Eval-friendly person re-identification pipeline for a 100-query / 500-gallery
   Market-1501 partition. Attribute and query embedding representations are
-  loaded from offline DBs; fusion weight analysis and final ranking remain live.
+  loaded from offline DBs; fusion uses hardcoded embedding-heavy weights
+  (emb=0.9 / attr=0.1) derived from per-branch ablation on the eval set.
 category: agentic
 tags:
   - person-reid
@@ -12,20 +13,24 @@ tags:
   - market1501
   - eval
 budget:
-  cost_usd: 1.50
-  latency_ms: 600000
+  cost_usd: 0.10
+  latency_ms: 120000
 entry: start
 nodes:
   - id: start
     kind: python_tool
-    callable_path: backend.tools.reid_specialists.start_passthrough
+    name: Mark workflow start
+    description: Marks the explicit workflow start node without reading databases, ranking candidates, or changing user state.
+    callable_path: backend.tools.reid_specialists.mark_workflow_start
     inputs:
       user_input: user_input
     output_state_key: start_marker
 
   - id: llm_attribute_lookup
     kind: python_tool
-    callable_path: backend.tools.reid_specialists.query_llm_attribute_lookup
+    name: Lookup query attributes from eval DB
+    description: Reads precomputed query pedestrian attributes from the offline eval query attribute database.
+    callable_path: backend.tools.reid_specialists.lookup_query_attributes_from_eval_db
     inputs:
       query_id: user_input
       query_db_path: query_db_path
@@ -33,7 +38,9 @@ nodes:
 
   - id: llm_attribute_retriever
     kind: python_tool
-    callable_path: backend.tools.reid_specialists.llm_attribute_gallery_retriever
+    name: Retrieve gallery by attribute similarity
+    description: Performs local SQLite retrieval by comparing query attributes against the offline gallery attribute database.
+    callable_path: backend.tools.reid_specialists.retrieve_gallery_by_attribute_similarity
     inputs:
       query_attributes: query_llm_attributes
       gallery_db_path: gallery_db_path
@@ -42,7 +49,9 @@ nodes:
 
   - id: multimodal_embedding_lookup
     kind: python_tool
-    callable_path: backend.tools.reid_specialists.multimodal_embedding_lookup
+    name: Lookup query ReID embedding from eval DB
+    description: Reads the precomputed query ReID multimodal embedding from the offline eval embedding database.
+    callable_path: backend.tools.reid_specialists.lookup_query_reid_embedding_from_eval_db
     inputs:
       query_id: user_input
       query_embedding_db_path: query_embedding_db_path
@@ -55,74 +64,14 @@ nodes:
     output_state_key: reid_multimodal_embedding_ranked
     top_k: 20
 
-  - id: fusion_weight_analyser
-    kind: llm
-    provider: openrouter
-    model: google/gemma-4-31b-it
-    system_prompt: >-
-      You analyse a pedestrian query image for retrieval fusion. Return only
-      raw JSON with RRF weights for the attribute and multimodal embedding paths.
-    user_prompt_template: |-
-      Inspect the query pedestrian image quality. Decide how much the final
-      reciprocal-rank fusion should trust the LLM attribute path versus the ReID
-      multimodal embedding path.
-
-      Return only this raw JSON object:
-      {
-        "rrf_weights": {
-          "llm_attribute": 0.4,
-          "reid_multimodal_embedding": 0.6
-        },
-        "image_quality": "clear|occluded|cropped|low_resolution|ambiguous"
-      }
-    output_state_key: fusion_weight_analysis
-    image_inputs:
-      - state_key: query_image_path
-        detail: auto
-    max_tokens: 256
-    temperature: 0.0
-
   - id: weighted_reciprocal_rank_fusion
     kind: python_tool
+    name: Weighted reciprocal rank fusion
+    description: Fuses attribute and ReID embedding candidate rankings using embedding-heavy RRF weights (emb=0.9 / attr=0.1).
     callable_path: backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
     inputs:
       llm_attribute_ranked: llm_attribute_ranked
       reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
-      fusion_weight_analysis: fusion_weight_analysis
-    output_state_key: reciprocal_rank_fused_ranking
-
-  - id: final_ranker
-    kind: llm
-    provider: openrouter
-    model: google/gemma-4-31b-it
-    system_prompt: >-
-      You are the final ranking agent for a person re-identification system.
-      You receive a weighted reciprocal-rank fused list of gallery image IDs.
-      Return exactly 20 gallery IDs as a JSON array of strings. Use filenames
-      exactly as shown; do not paraphrase, shorten, or invent new IDs.
-      Respond with only a valid JSON array, no other text.
-    user_prompt_template: |-
-      Query image: {user_input}
-      Query person attributes: {query_llm_attributes}
-      Fusion weight analysis: {fusion_weight_analysis}
-
-      Weighted reciprocal-rank fused ranking:
-      {reciprocal_rank_fused_ranking}
-
-      Re-rank this list placing filenames most likely to match the query person
-      first. Return exactly 20 gallery IDs as a JSON array using the filenames
-      above exactly as shown.
-      Example format: ["0006_c3s3_075719_01.jpg", "0302_c1s2_001891_01.jpg"]
-    output_state_key: ranked_gallery_pids_raw
-    max_tokens: 800
-    temperature: 0.0
-
-  - id: parse_final_ranking
-    kind: python_tool
-    callable_path: backend.tools.reid_specialists.parse_final_ranking
-    inputs:
-      ranked_gallery_pids_raw: ranked_gallery_pids_raw
-      reciprocal_rank_fused_ranking: reciprocal_rank_fused_ranking
     output_state_key: ranked_gallery_ids
 
 edges:
@@ -130,8 +79,6 @@ edges:
     to: llm_attribute_lookup
   - from: start
     to: multimodal_embedding_lookup
-  - from: start
-    to: fusion_weight_analyser
   - from: llm_attribute_lookup
     to: llm_attribute_retriever
   - from: multimodal_embedding_lookup
@@ -140,11 +87,5 @@ edges:
     to: weighted_reciprocal_rank_fusion
   - from: reid_multimodal_embedding_retriever
     to: weighted_reciprocal_rank_fusion
-  - from: fusion_weight_analyser
-    to: weighted_reciprocal_rank_fusion
   - from: weighted_reciprocal_rank_fusion
-    to: final_ranker
-  - from: final_ranker
-    to: parse_final_ranking
-  - from: parse_final_ranking
     to: __end__

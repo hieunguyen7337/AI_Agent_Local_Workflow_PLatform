@@ -9,21 +9,23 @@ runs/workflows/<workflow>/<YYYYMMDD>/<run_id>/
 Run ids are intentionally readable and sortable:
 
 ```text
-run_YYYYMMDDTHHMMSSZ_<workflow>_<8hex>
+run_YYYY_MM_DD_HHhMMmSSs_AEST_<workflow>_<8hex>
 ```
 
 Example:
 
 ```text
-run_20260425T091230Z_coder_tester_a1b2c3d4
+run_2026_04_25_19h12m30s_AEST_coder_tester_a1b2c3d4
 ```
 
 ## Files
 
 - `run_manifest.json` - start here. It summarizes workflow, run id, timestamps, status, error, and key artifact paths.
+- `audit.json` - human-readable final state summary for a normal workflow run.
+- `node_events.jsonl` - human-readable node inputs/outputs, prompts, model responses, tool kwargs, retriever outputs, timing, and errors.
 - `spans.jsonl` - human-readable span stream, one JSON object per line. Use a text editor for quick scanning.
 - `telemetry.db` - SQLite database for run summary and span rows. This is the main inspection database.
-- `checkpoints.db` - SQLite database used by LangGraph checkpointing for replay/resume boundaries. Prefer the app or replay CLI over manually reading it.
+- `checkpoints.db` - internal SQLite database used by LangGraph checkpointing for replay/resume boundaries. Prefer `audit.json`, `node_events.jsonl`, the app, or replay CLI over manually reading it.
 - `approval.json` - pending approval prompt, targets, and review state snapshot.
 - `approval_decision.json` - reviewer decision, comment, timestamp, and continuation run id.
 - `approval_resume.json` - continuation lineage after an approval decision.
@@ -34,6 +36,14 @@ run_20260425T091230Z_coder_tester_a1b2c3d4
 - `subgraph_resume.json` - written in the parent continuation run dir after the parent resumes; links back to the source parent run and child decision.
 
 Do not edit `.db` files by hand unless intentionally repairing local artifacts.
+
+Dataset evals are stored as one compact audit folder:
+
+```text
+runs/evals/<workflow>/2026_04_30_09h32m43s_AEST_<workflow>_100q_500g/
+```
+
+Eval folders contain `eval_summary.json`, `rows.jsonl`, `failed_rows.jsonl`, `node_events.jsonl`, `manifest.json`, and `telemetry.db`. Dataset eval rows do not create per-row `checkpoints.db` files.
 
 ## Reading SQLite Files
 

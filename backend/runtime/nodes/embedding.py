@@ -12,6 +12,7 @@ from opentelemetry.trace import Status, StatusCode
 from backend.builder.nodes import EmbeddingNodeConfig
 from backend.providers import call_embedding_provider
 from backend.providers.pricing import price_for
+from backend.runtime.audit import AuditRecorder, audit_preview
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.errors import CancelledError
 from backend.runtime.state import WorkflowState
@@ -33,6 +34,7 @@ def make_embedding_node(
     graph_name: str,
     on_cost: Callable[[float], None],
     cancellation: CancellationController | None = None,
+    audit: AuditRecorder | None = None,
 ) -> Callable[[WorkflowState], dict]:
     """Return a LangGraph-compatible embedding node function."""
     tracer = get_tracer()
@@ -86,13 +88,37 @@ def make_embedding_node(
                 span.set_attribute(WORKFLOW_LATENCY_MS, latency_ms)
                 span.set_status(Status(StatusCode.OK))
                 on_cost(cost)
+                if audit is not None:
+                    audit.write_event(
+                        {
+                            "node_id": cfg.id,
+                            "node_kind": "embedding",
+                            "status": "ok",
+                            "model": resp.model,
+                            "input_template": _format_template(cfg.input_template, state),
+                            "image_inputs": [
+                                {"state_key": item.state_key, "path": str(state.get(item.state_key, "")), "detail": item.detail}
+                                for item in cfg.image_inputs
+                            ],
+                            "output_state_key": cfg.output_state_key,
+                            "embedding_dimensions": len(resp.embedding),
+                            "output_preview": audit_preview(resp.embedding[:10]),
+                            "usage": {"input_tokens": resp.usage.input_tokens, "output_tokens": 0},
+                            "cost_usd": cost,
+                            "latency_ms": latency_ms,
+                        }
+                    )
                 return {cfg.output_state_key: resp.embedding}
             except CancelledError as e:
                 span.set_attribute(WORKFLOW_STATUS, "cancelled")
                 span.set_status(Status(StatusCode.ERROR, str(e)))
+                if audit is not None:
+                    audit.write_event({"node_id": cfg.id, "node_kind": "embedding", "status": "cancelled", "error": str(e)})
                 raise
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
+                if audit is not None:
+                    audit.write_event({"node_id": cfg.id, "node_kind": "embedding", "status": "error", "error": f"{type(e).__name__}: {e}"})
                 raise
 
     _node.__name__ = f"embedding_{cfg.id}"

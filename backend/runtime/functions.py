@@ -55,6 +55,11 @@ def run_workflow_function(
     recursion_limit: int = 50,
     start_at_node: str | None = None,
     cancellation: CancellationController | None = None,
+    run_dir_override: Path | None = None,
+    use_checkpointer: bool = True,
+    write_manifest_files: bool = True,
+    write_audit_summary: bool = True,
+    audit_context: dict[str, Any] | None = None,
 ) -> WorkflowFunctionResult:
     """Run a YAML workflow as a reusable local function.
 
@@ -80,6 +85,11 @@ def run_workflow_function(
         recursion_limit=recursion_limit,
         start_at_node=start_at_node,
         cancellation=cancellation,
+        run_dir_override=run_dir_override,
+        use_checkpointer=use_checkpointer,
+        write_manifest_files=write_manifest_files,
+        write_audit_summary=write_audit_summary,
+        audit_context=audit_context,
     )
     return WorkflowFunctionResult(
         workflow=workflow_id,
@@ -100,6 +110,10 @@ def run_workflow_batch(
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
     runs_root: Path = RUNS_ROOT,
     cancellation: CancellationController | None = None,
+    shared_run_dir: Path | None = None,
+    use_checkpointer: bool = True,
+    write_manifest_files: bool = True,
+    write_audit_summary: bool = True,
 ) -> list[WorkflowBatchResult]:
     """Run multiple workflow-function calls with bounded thread concurrency.
 
@@ -119,6 +133,11 @@ def run_workflow_batch(
                 expected=item.expected,
                 runs_root=runs_root,
                 cancellation=cancellation,
+                run_dir_override=shared_run_dir,
+                use_checkpointer=use_checkpointer,
+                write_manifest_files=write_manifest_files,
+                write_audit_summary=write_audit_summary,
+                audit_context={"row_index": index, "item_id": item.id} if shared_run_dir is not None else None,
             )
             return index, WorkflowBatchResult(
                 id=item.id,

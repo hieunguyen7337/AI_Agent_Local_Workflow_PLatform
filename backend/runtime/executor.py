@@ -26,6 +26,7 @@ from backend.builder.nodes import (
     VectorRetrieverNodeConfig,
 )
 from backend.runtime.cancellation import CancellationController
+from backend.runtime.audit import AuditRecorder
 from backend.runtime.artifacts import make_run_id, run_dir_for_id, write_run_manifest
 from backend.runtime.errors import (
     BudgetExceededError,
@@ -80,6 +81,7 @@ def _node_factory(
     run_dir: Path,
     runs_root: Path,
     cancellation: CancellationController | None,
+    audit: AuditRecorder | None = None,
 ):
     def _on_cost(usd: float) -> None:
         enforcer.add_cost(usd)
@@ -100,6 +102,7 @@ def _node_factory(
                 graph_name=graph_name,
                 on_cost=_on_cost,
                 cancellation=cancellation,
+                audit=audit,
             )
         elif isinstance(cfg, EmbeddingNodeConfig):
             base = make_embedding_node(
@@ -108,6 +111,7 @@ def _node_factory(
                 graph_name=graph_name,
                 on_cost=_on_cost,
                 cancellation=cancellation,
+                audit=audit,
             )
         elif isinstance(cfg, TesterNodeConfig):
             base = make_tester_node(
@@ -118,9 +122,9 @@ def _node_factory(
                 cancellation=cancellation,
             )
         elif isinstance(cfg, RetrieverNodeConfig):
-            base = make_retriever_node(cfg, run_id=run_id, graph_name=graph_name)
+            base = make_retriever_node(cfg, run_id=run_id, graph_name=graph_name, audit=audit)
         elif isinstance(cfg, VectorRetrieverNodeConfig):
-            base = make_vector_retriever_node(cfg, run_id=run_id, graph_name=graph_name)
+            base = make_vector_retriever_node(cfg, run_id=run_id, graph_name=graph_name, audit=audit)
         elif isinstance(cfg, GateNodeConfig):
             loop = _find_loop(metadata, cfg.fail_target)
             return make_gate_passthrough(cfg, loop, run_id=run_id, graph_name=graph_name)
@@ -141,6 +145,7 @@ def _node_factory(
                 run_id=run_id,
                 graph_name=graph_name,
                 cancellation=cancellation,
+                audit=audit,
             )
         else:
             raise TypeError(f"Unknown node kind: {type(cfg).__name__}")
@@ -220,10 +225,16 @@ def run_graph(
     recursion_limit: int = 50,
     start_at_node: str | None = None,
     cancellation: CancellationController | None = None,
+    run_dir_override: Path | None = None,
+    use_checkpointer: bool = True,
+    write_manifest_files: bool = True,
+    write_audit_summary: bool = True,
+    audit_context: dict[str, Any] | None = None,
 ) -> RunResult:
     run_id = run_id or make_run_id(metadata.name)
-    run_dir = run_dir_for_id(runs_root, metadata.name, run_id)
+    run_dir = run_dir_override or run_dir_for_id(runs_root, metadata.name, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
+    audit = AuditRecorder(run_dir=run_dir, run_id=run_id, workflow=metadata.name, context=audit_context or {})
 
     tracer = init_tracer(run_dir, run_id=run_id)
 
@@ -234,13 +245,14 @@ def run_graph(
     enforcer.start()
 
     started_ns = time.time_ns()
-    write_run_manifest(
-        run_dir,
-        workflow=metadata.name,
-        run_id=run_id,
-        started_ns=started_ns,
-        status="running",
-    )
+    if write_manifest_files:
+        write_run_manifest(
+            run_dir,
+            workflow=metadata.name,
+            run_id=run_id,
+            started_ns=started_ns,
+            status="running",
+        )
     record_run_start(
         run_dir / "telemetry.db",
         run_id=run_id,
@@ -262,6 +274,7 @@ def run_graph(
             run_dir=run_dir,
             runs_root=runs_root,
             cancellation=cancellation,
+            audit=audit,
         ),
         gate_router_factory=_gate_router_factory(run_id, metadata.name),
         router_dispatch_factory=_router_dispatch_factory(),
@@ -269,95 +282,157 @@ def run_graph(
     )
 
     checkpoint_path = run_dir / "checkpoints.db"
+    saver_context = SqliteSaver.from_conn_string(str(checkpoint_path)) if use_checkpointer else None
+
+    if saver_context is None:
+        app = compiled_sg.compile()
+        return _run_compiled_app(
+            app,
+            metadata=metadata,
+            run_id=run_id,
+            run_dir=run_dir,
+            user_input=user_input,
+            expected=expected,
+            initial_state_overrides=initial_state_overrides,
+            thread_id=thread_id,
+            recursion_limit=recursion_limit,
+            cancellation=cancellation,
+            enforcer=enforcer,
+            started_ns=started_ns,
+            write_manifest_files=write_manifest_files,
+            write_audit_summary=write_audit_summary,
+            audit=audit,
+        )
+
     # SqliteSaver.from_conn_string is a context manager; we enter it for the duration.
-    with SqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
+    with saver_context as saver:
         app = compiled_sg.compile(checkpointer=saver)
+        return _run_compiled_app(
+            app,
+            metadata=metadata,
+            run_id=run_id,
+            run_dir=run_dir,
+            user_input=user_input,
+            expected=expected,
+            initial_state_overrides=initial_state_overrides,
+            thread_id=thread_id,
+            recursion_limit=recursion_limit,
+            cancellation=cancellation,
+            enforcer=enforcer,
+            started_ns=started_ns,
+            write_manifest_files=write_manifest_files,
+            write_audit_summary=write_audit_summary,
+            audit=audit,
+        )
 
-        state: WorkflowState = new_state(user_input)
-        if expected is not None:
-            state["_expected"] = expected  # consumed by tester
-        if initial_state_overrides:
-            state.update(initial_state_overrides)
 
-        thread_id = thread_id or run_id
-        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": recursion_limit}
+def _run_compiled_app(
+    app,
+    *,
+    metadata: GraphMetadata,
+    run_id: str,
+    run_dir: Path,
+    user_input: str,
+    expected: str | None,
+    initial_state_overrides: dict[str, Any] | None,
+    thread_id: str | None,
+    recursion_limit: int,
+    cancellation: CancellationController | None,
+    enforcer: BudgetEnforcer,
+    started_ns: int,
+    write_manifest_files: bool,
+    write_audit_summary: bool,
+    audit: AuditRecorder,
+) -> RunResult:
+    state: WorkflowState = new_state(user_input)
+    if expected is not None:
+        state["_expected"] = expected  # consumed by tester
+    if initial_state_overrides:
+        state.update(initial_state_overrides)
 
-        status = "ok"
-        error: str | None = None
-        final_state: dict = dict(state)
+    thread_id = thread_id or run_id
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": recursion_limit}
 
-        root_attrs = {
-            WORKFLOW_RUN_ID: run_id,
-            WORKFLOW_GRAPH_NAME: metadata.name,
-        }
-        with tracer.start_as_current_span(f"run.{metadata.name}", attributes=root_attrs) as span:
-            try:
-                # Budget enforcement is an intentional node-boundary check: after each
-                # completed step update, before the next node is dispatched.
-                last_state = final_state
+    status = "ok"
+    error: str | None = None
+    final_state: dict = dict(state)
+
+    tracer = init_tracer(run_dir, run_id=run_id)
+    root_attrs = {
+        WORKFLOW_RUN_ID: run_id,
+        WORKFLOW_GRAPH_NAME: metadata.name,
+    }
+    with tracer.start_as_current_span(f"run.{metadata.name}", attributes=root_attrs) as span:
+        try:
+            # Budget enforcement is an intentional node-boundary check: after each
+            # completed step update, before the next node is dispatched.
+            last_state = final_state
+            if cancellation is not None:
+                cancellation.raise_if_cancelled()
+            for chunk in app.stream(state, config=config):
+                for _node_id, update in chunk.items():
+                    if isinstance(update, dict):
+                        last_state.update(update)
                 if cancellation is not None:
                     cancellation.raise_if_cancelled()
-                for chunk in app.stream(state, config=config):
-                    for _node_id, update in chunk.items():
-                        if isinstance(update, dict):
-                            last_state.update(update)
-                    if cancellation is not None:
-                        cancellation.raise_if_cancelled()
-                    try:
-                        enforcer.check()
-                    except BudgetExceededError as be:
-                        status = "budget_exceeded"
-                        error = str(be)
-                        span.set_attribute(WORKFLOW_STATUS, status)
-                        raise
-                # Read back the checkpointed final state for completeness.
                 try:
-                    final_snapshot = app.get_state(config)
-                    if final_snapshot and final_snapshot.values:
-                        last_state.update(final_snapshot.values)
-                except Exception:
-                    pass
-                final_state = last_state
-            except CancelledError as ce:
-                status = "cancelled"
-                error = str(ce)
-                span.set_attribute(WORKFLOW_STATUS, status)
-            except PendingApprovalError as pae:
-                status = "pending_approval"
-                error = None
-                last_state.update(pae.state_update)
-                final_state = last_state
-                span.set_attribute(WORKFLOW_STATUS, status)
-            except PendingSubgraphApprovalError as psae:
-                status = "pending_approval"
-                error = None
-                last_state.update(psae.state_update)
-                final_state = last_state
-                span.set_attribute(WORKFLOW_STATUS, status)
-            except BudgetExceededError:
+                    enforcer.check()
+                except BudgetExceededError as be:
+                    status = "budget_exceeded"
+                    error = str(be)
+                    span.set_attribute(WORKFLOW_STATUS, status)
+                    raise
+            # Read back the checkpointed final state for completeness.
+            try:
+                final_snapshot = app.get_state(config)
+                if final_snapshot and final_snapshot.values:
+                    last_state.update(final_snapshot.values)
+            except Exception:
                 pass
-            except WorkflowError as we:
-                status = we.__class__.__name__
-                error = str(we)
-                span.set_attribute(WORKFLOW_STATUS, status)
-            except Exception as e:
-                status = "error"
-                error = f"{type(e).__name__}: {e}"
-                span.set_attribute(WORKFLOW_STATUS, status)
+            final_state = last_state
+        except CancelledError as ce:
+            status = "cancelled"
+            error = str(ce)
+            span.set_attribute(WORKFLOW_STATUS, status)
+        except PendingApprovalError as pae:
+            status = "pending_approval"
+            error = None
+            last_state.update(pae.state_update)
+            final_state = last_state
+            span.set_attribute(WORKFLOW_STATUS, status)
+        except PendingSubgraphApprovalError as psae:
+            status = "pending_approval"
+            error = None
+            last_state.update(psae.state_update)
+            final_state = last_state
+            span.set_attribute(WORKFLOW_STATUS, status)
+        except BudgetExceededError:
+            pass
+        except WorkflowError as we:
+            status = we.__class__.__name__
+            error = str(we)
+            span.set_attribute(WORKFLOW_STATUS, status)
+        except Exception as e:
+            status = "error"
+            error = f"{type(e).__name__}: {e}"
+            span.set_attribute(WORKFLOW_STATUS, status)
 
-            span.set_attribute(WORKFLOW_COST_USD, enforcer.cost_accum_usd)
-            span.set_attribute(WORKFLOW_LATENCY_MS, enforcer.latency_ms())
+        span.set_attribute(WORKFLOW_COST_USD, enforcer.cost_accum_usd)
+        span.set_attribute(WORKFLOW_LATENCY_MS, enforcer.latency_ms())
 
-        ended_ns = time.time_ns()
-        record_run_end(
-            run_dir / "telemetry.db",
-            run_id=run_id,
-            ended_ns=ended_ns,
-            status=status,
-            cost_usd=enforcer.cost_accum_usd,
-            latency_ms=enforcer.latency_ms(),
-            error=error,
-        )
+    ended_ns = time.time_ns()
+    record_run_end(
+        run_dir / "telemetry.db",
+        run_id=run_id,
+        ended_ns=ended_ns,
+        status=status,
+        cost_usd=enforcer.cost_accum_usd,
+        latency_ms=enforcer.latency_ms(),
+        error=error,
+    )
+    if write_audit_summary:
+        audit.write_summary(status=status, error=error, final_state=final_state)
+    if write_manifest_files:
         write_run_manifest(
             run_dir,
             workflow=metadata.name,

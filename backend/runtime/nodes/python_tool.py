@@ -11,6 +11,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from backend.builder.nodes import PythonToolNodeConfig
 from backend.builder.python_tool_allowlist import load_allowlist
+from backend.runtime.audit import AuditRecorder, audit_preview
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.state import WorkflowState
 from backend.telemetry.genai_attrs import WORKFLOW_LATENCY_MS, WORKFLOW_STATUS, node_attrs
@@ -25,6 +26,7 @@ def make_python_tool_node(
     run_id: str,
     graph_name: str,
     cancellation: CancellationController | None = None,
+    audit: AuditRecorder | None = None,
 ) -> Callable[[WorkflowState], dict]:
     tracer = get_tracer()
 
@@ -57,10 +59,35 @@ def make_python_tool_node(
                 if captured_err:
                     span.set_attribute("python_tool.stderr", captured_err[:_MAX_CAPTURED_BYTES])
                 span.set_status(Status(StatusCode.OK))
+                if audit is not None:
+                    audit.write_event(
+                        {
+                            "node_id": cfg.id,
+                            "node_kind": "python_tool",
+                            "status": "ok",
+                            "callable_path": cfg.callable_path,
+                            "inputs": audit_preview(kwargs),
+                            "output_state_key": cfg.output_state_key,
+                            "output": audit_preview(result),
+                            "stdout": audit_preview(captured),
+                            "stderr": audit_preview(captured_err),
+                            "latency_ms": latency_ms,
+                        }
+                    )
                 return {cfg.output_state_key: result}
             except Exception as e:
                 span.set_attribute(WORKFLOW_STATUS, "error")
                 span.set_status(Status(StatusCode.ERROR, str(e)))
+                if audit is not None:
+                    audit.write_event(
+                        {
+                            "node_id": cfg.id,
+                            "node_kind": "python_tool",
+                            "status": "error",
+                            "callable_path": cfg.callable_path,
+                            "error": f"{type(e).__name__}: {e}",
+                        }
+                    )
                 raise
 
     _node.__name__ = f"python_tool_{cfg.id}"

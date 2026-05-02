@@ -121,9 +121,8 @@ def test_graphspec_accepts_python_tool_node():
                     "inputs": {
                         "llm_attribute_ranked": "llm_attribute_ranked",
                         "reid_multimodal_embedding_ranked": "reid_multimodal_embedding_ranked",
-                        "fusion_weight_analysis": "fusion_weight_analysis",
                     },
-                    "output_state_key": "reciprocal_rank_fused_ranking",
+                    "output_state_key": "ranked_gallery_ids",
                 }
             ],
             "edges": [{"from": "fusion", "to": "__end__"}],
@@ -134,9 +133,8 @@ def test_graphspec_accepts_python_tool_node():
     assert node.inputs == {
         "llm_attribute_ranked": "llm_attribute_ranked",
         "reid_multimodal_embedding_ranked": "reid_multimodal_embedding_ranked",
-        "fusion_weight_analysis": "fusion_weight_analysis",
     }
-    assert node.output_state_key == "reciprocal_rank_fused_ranking"
+    assert node.output_state_key == "ranked_gallery_ids"
 
 
 def test_graphspec_rejects_unknown_callable():
@@ -289,16 +287,13 @@ def _make_gallery_db(path: Path) -> Path:
                 attributes_json TEXT NOT NULL,
                 gender TEXT NOT NULL,
                 hair TEXT NOT NULL,
-                age TEXT NOT NULL,
                 clothing_type TEXT NOT NULL,
                 upper_body_clothes TEXT NOT NULL,
                 lower_body_clothes TEXT NOT NULL,
                 hat TEXT NOT NULL,
                 backpack TEXT NOT NULL,
                 bag TEXT NOT NULL,
-                handbag TEXT NOT NULL,
-                upper_body_clothes_color TEXT NOT NULL,
-                lower_body_clothes_color TEXT NOT NULL
+                handbag TEXT NOT NULL
             )
             """
         )
@@ -306,16 +301,15 @@ def _make_gallery_db(path: Path) -> Path:
             """
             INSERT INTO gallery_attributes (
                 gallery_id, image_path, pid, camid, attributes_json,
-                gender, hair, age, clothing_type, upper_body_clothes,
-                lower_body_clothes, hat, backpack, bag, handbag,
-                upper_body_clothes_color, lower_body_clothes_color
+                gender, hair, clothing_type, upper_body_clothes,
+                lower_body_clothes, hat, backpack, bag, handbag
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                ("g1.jpg", "/gallery/g1.jpg", 1, 1, "{}", "male", "short", "adult", "pants", "short sleeve", "long", "no", "yes", "no", "no", "red", "blue"),
-                ("g2.jpg", "/gallery/g2.jpg", 2, 2, "{}", "female", "long", "adult", "dress", "short sleeve", "long", "no", "no", "yes", "no", "blue", "black"),
-                ("g3.jpg", "/gallery/g3.jpg", 3, 3, "{}", "male", "short", "adult", "pants", "short sleeve", "long", "no", "yes", "no", "no", "red", "blue"),
+                ("g1.jpg", "/gallery/g1.jpg", 1, 1, "{}", "male", "short", "pants", "short sleeve", "long", "no", "yes", "no", "no"),
+                ("g2.jpg", "/gallery/g2.jpg", 2, 2, "{}", "female", "long", "dress", "short sleeve", "long", "no", "no", "yes", "no"),
+                ("g3.jpg", "/gallery/g3.jpg", 3, 3, "{}", "male", "short", "pants", "short sleeve", "long", "no", "yes", "no", "no"),
             ],
         )
     return path
@@ -333,16 +327,13 @@ def _make_query_db(path: Path) -> Path:
                 attributes_json TEXT NOT NULL,
                 gender TEXT NOT NULL,
                 hair TEXT NOT NULL,
-                age TEXT NOT NULL,
                 clothing_type TEXT NOT NULL,
                 upper_body_clothes TEXT NOT NULL,
                 lower_body_clothes TEXT NOT NULL,
                 hat TEXT NOT NULL,
                 backpack TEXT NOT NULL,
                 bag TEXT NOT NULL,
-                handbag TEXT NOT NULL,
-                upper_body_clothes_color TEXT NOT NULL,
-                lower_body_clothes_color TEXT NOT NULL
+                handbag TEXT NOT NULL
             )
             """
         )
@@ -350,11 +341,10 @@ def _make_query_db(path: Path) -> Path:
             """
             INSERT INTO image_attributes (
                 image_id, image_path, pid, camid, attributes_json,
-                gender, hair, age, clothing_type, upper_body_clothes,
-                lower_body_clothes, hat, backpack, bag, handbag,
-                upper_body_clothes_color, lower_body_clothes_color
+                gender, hair, clothing_type, upper_body_clothes,
+                lower_body_clothes, hat, backpack, bag, handbag
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "q1.jpg",
@@ -364,7 +354,6 @@ def _make_query_db(path: Path) -> Path:
                 "{}",
                 "male",
                 "short",
-                "adult",
                 "pants",
                 "short sleeve",
                 "long",
@@ -372,8 +361,6 @@ def _make_query_db(path: Path) -> Path:
                 "yes",
                 "no",
                 "no",
-                "red",
-                "blue",
             ),
         )
     return path
@@ -396,15 +383,14 @@ def _make_query_embedding_db(path: Path) -> Path:
     return path
 
 
-def test_query_llm_attribute_lookup_reads_query_db(tmp_path: Path):
-    from backend.tools.reid_specialists import query_llm_attribute_lookup
+def test_lookup_query_attributes_from_eval_db_reads_query_db(tmp_path: Path):
+    from backend.tools.reid_specialists import lookup_query_attributes_from_eval_db
 
     db_path = _make_query_db(tmp_path / "query.sqlite")
-    result = query_llm_attribute_lookup("q1.jpg", str(db_path))
+    result = lookup_query_attributes_from_eval_db("q1.jpg", str(db_path))
     assert result == {
         "gender": "male",
         "hair": "short",
-        "age": "adult",
         "clothing_type": "pants",
         "upper_body_clothes": "short sleeve",
         "lower_body_clothes": "long",
@@ -412,39 +398,57 @@ def test_query_llm_attribute_lookup_reads_query_db(tmp_path: Path):
         "backpack": "yes",
         "bag": "no",
         "handbag": "no",
-        "upper_body_clothes_color": "red",
-        "lower_body_clothes_color": "blue",
     }
 
 
-def test_llm_attribute_gallery_retriever_ranks_matching_attributes(tmp_path: Path):
-    from backend.tools.reid_specialists import llm_attribute_gallery_retriever
+def test_retrieve_gallery_by_attribute_similarity_ranks_matching_attributes(tmp_path: Path):
+    from backend.tools.reid_specialists import retrieve_gallery_by_attribute_similarity
 
     db_path = _make_gallery_db(tmp_path / "gallery.sqlite")
-    result = llm_attribute_gallery_retriever(
-        query_attributes='{"gender": "male", "hair": "short", "age": "adult", "clothing_type": "pants", "upper_body_clothes": "short sleeve", "lower_body_clothes": "long", "hat": "no", "backpack": "yes", "bag": "no", "handbag": "no", "upper_body_clothes_color": "red", "lower_body_clothes_color": "blue"}',
+    result = retrieve_gallery_by_attribute_similarity(
+        query_attributes='{"gender": "male", "hair": "short", "clothing_type": "pants", "upper_body_clothes": "short sleeve", "lower_body_clothes": "long", "hat": "no", "backpack": "yes", "bag": "no", "handbag": "no"}',
         gallery_db_path=str(db_path),
         top_k=2,
     )
     assert result == ["g1.jpg", "g3.jpg"]
 
 
-def test_multimodal_embedding_lookup_reads_query_db(tmp_path: Path):
-    from backend.tools.reid_specialists import multimodal_embedding_lookup
+def test_lookup_query_reid_embedding_from_eval_db_reads_query_db(tmp_path: Path):
+    from backend.tools.reid_specialists import lookup_query_reid_embedding_from_eval_db
 
     db_path = _make_query_embedding_db(tmp_path / "query_embeddings.sqlite")
-    assert multimodal_embedding_lookup("q1.jpg", str(db_path)) == [0.1, 0.2, 0.3]
+    assert lookup_query_reid_embedding_from_eval_db("q1.jpg", str(db_path)) == [0.1, 0.2, 0.3]
 
 
-def test_weighted_reciprocal_rank_fusion_uses_weights():
+def test_weighted_reciprocal_rank_fusion_uses_default_embedding_heavy_weights():
     from backend.tools.reid_specialists import weighted_reciprocal_rank_fusion
 
+    # No explicit weights — defaults to emb=0.9 / attr=0.1
     result = weighted_reciprocal_rank_fusion(
         llm_attribute_ranked=["b", "d"],
         reid_multimodal_embedding_ranked=["c", "a"],
-        fusion_weight_analysis='{"rrf_weights": {"llm_attribute": 0.1, "reid_multimodal_embedding": 0.9}}',
     )
     assert result[:2] == ["c", "a"]
+
+
+def test_weighted_reciprocal_rank_fusion_respects_explicit_weights():
+    from backend.tools.reid_specialists import weighted_reciprocal_rank_fusion
+
+    # Attribute-heavy weights flip the order
+    result = weighted_reciprocal_rank_fusion(
+        llm_attribute_ranked=["b", "d"],
+        reid_multimodal_embedding_ranked=["c", "a"],
+        fusion_weight_analysis='{"rrf_weights": {"llm_attribute": 0.9, "reid_multimodal_embedding": 0.1}}',
+    )
+    assert result[:2] == ["b", "d"]
+
+
+def test_workflow_state_declares_ranked_gallery_ids():
+    from backend.runtime.state import WorkflowState
+
+    assert "ranked_gallery_ids" in WorkflowState.__annotations__
+    assert "aliased_reciprocal_rank_fused_ranking" not in WorkflowState.__annotations__
+    assert "ranked_gallery_pids_raw" not in WorkflowState.__annotations__
 
 
 # ---------------------------------------------------------------------------
@@ -458,9 +462,10 @@ def test_person_reid_workflow_spec_loads():
     spec = load_graph_spec("person_reid_market1501")
     assert spec.name == "person_reid_market1501"
     node_kinds = {n.id: n.kind for n in spec.nodes}
-    assert "visual_specialist" not in node_kinds
-    assert "text_specialist" not in node_kinds
-    assert "body_shape_specialist" not in node_kinds
+    assert "fusion_weight_analyser" not in node_kinds
+    assert "alias_gallery_ids_for_ranker" not in node_kinds
+    assert "final_ranker" not in node_kinds
+    assert "parse_final_ranking" not in node_kinds
     assert "boss_orchestrator" not in node_kinds
     assert "rrf_precompute" not in node_kinds
     assert node_kinds["start"] == "python_tool"
@@ -468,20 +473,23 @@ def test_person_reid_workflow_spec_loads():
     assert node_kinds["llm_attribute_retriever"] == "python_tool"
     assert node_kinds["reid_multimodal_embedding"] == "embedding"
     assert node_kinds["reid_multimodal_embedding_retriever"] == "vector_retriever"
-    assert node_kinds["fusion_weight_analyser"] == "llm"
     assert node_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
-    assert node_kinds["final_ranker"] == "llm"
-    analyser = next(n for n in spec.nodes if n.id == "fusion_weight_analyser")
+    for node in spec.nodes:
+        if node.kind == "python_tool":
+            assert node.name.strip()
+            assert node.description.strip()
     attribute = next(n for n in spec.nodes if n.id == "llm_attribute_parser")
     embedding = next(n for n in spec.nodes if n.id == "reid_multimodal_embedding")
-    final_ranker = next(n for n in spec.nodes if n.id == "final_ranker")
-    assert analyser.model == "google/gemma-4-31b-it"
+    rrf = next(n for n in spec.nodes if n.id == "weighted_reciprocal_rank_fusion")
     assert attribute.model == "qwen/qwen3.5-9b"
     assert embedding.model == "google/gemini-embedding-2-preview"
-    assert final_ranker.model == "google/gemma-4-31b-it"
-    assert analyser.image_inputs[0].state_key == "query_image_path"
     assert attribute.image_inputs[0].state_key == "query_image_path"
     assert embedding.input_template == ""
+    assert "Label the main pedestrian in this image." in attribute.user_prompt_template
+    assert "upper_body_clothes_color" not in attribute.user_prompt_template
+    assert '"age"' not in attribute.user_prompt_template
+    assert rrf.output_state_key == "ranked_gallery_ids"
+    assert "fusion_weight_analysis" not in (rrf.inputs or {})
 
 
 def test_person_reid_eval_workflow_spec_loads():
@@ -489,22 +497,46 @@ def test_person_reid_eval_workflow_spec_loads():
 
     spec = load_graph_spec("person_reid_market1501_eval")
     node_kinds = {n.id: n.kind for n in spec.nodes}
+    assert "fusion_weight_analyser" not in node_kinds
+    assert "alias_gallery_ids_for_ranker" not in node_kinds
+    assert "final_ranker" not in node_kinds
+    assert "parse_final_ranking" not in node_kinds
     assert "boss_orchestrator" not in node_kinds
     assert "rrf_precompute" not in node_kinds
     assert node_kinds["start"] == "python_tool"
-    assert node_kinds["fusion_weight_analyser"] == "llm"
     assert node_kinds["llm_attribute_lookup"] == "python_tool"
     assert node_kinds["multimodal_embedding_lookup"] == "python_tool"
     assert node_kinds["reid_multimodal_embedding_retriever"] == "vector_retriever"
     assert node_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
-    assert node_kinds["final_ranker"] == "llm"
-    analyser = next(n for n in spec.nodes if n.id == "fusion_weight_analyser")
+    for node in spec.nodes:
+        if node.kind == "python_tool":
+            assert node.name.strip()
+            assert node.description.strip()
     attribute = next(n for n in spec.nodes if n.id == "llm_attribute_lookup")
     embedding = next(n for n in spec.nodes if n.id == "multimodal_embedding_lookup")
-    final_ranker = next(n for n in spec.nodes if n.id == "final_ranker")
-    assert analyser.model == "google/gemma-4-31b-it"
-    assert attribute.callable_path == "backend.tools.reid_specialists.query_llm_attribute_lookup"
-    assert embedding.callable_path == "backend.tools.reid_specialists.multimodal_embedding_lookup"
-    assert final_ranker.model == "google/gemma-4-31b-it"
-    assert final_ranker.output_state_key == "ranked_gallery_pids_raw"
-    assert node_kinds["parse_final_ranking"] == "python_tool"
+    rrf = next(n for n in spec.nodes if n.id == "weighted_reciprocal_rank_fusion")
+    assert attribute.callable_path == "backend.tools.reid_specialists.lookup_query_attributes_from_eval_db"
+    assert embedding.callable_path == "backend.tools.reid_specialists.lookup_query_reid_embedding_from_eval_db"
+    assert rrf.output_state_key == "ranked_gallery_ids"
+    assert "fusion_weight_analysis" not in (rrf.inputs or {})
+
+
+def test_person_reid_llm_prompts_with_literal_json_format_cleanly():
+    from backend.graphspec import load_graph_spec
+
+    class _SafeDict(dict):
+        def __missing__(self, key):
+            return ""
+
+    state = _SafeDict(
+        user_input="query.jpg",
+        query_image_path="/tmp/query.jpg",
+        query_llm_attributes={"gender": "male"},
+    )
+
+    # Only the main workflow still has LLM nodes (attribute parser); eval is all python_tool
+    spec = load_graph_spec("person_reid_market1501")
+    for node in spec.nodes:
+        if node.kind == "llm":
+            rendered = node.user_prompt_template.format_map(state)
+            assert "{" in rendered or "[" in rendered

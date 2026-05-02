@@ -31,7 +31,6 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 ATTRIBUTE_KEYS = (
     "gender",
     "hair",
-    "age",
     "clothing_type",
     "upper_body_clothes",
     "lower_body_clothes",
@@ -39,31 +38,25 @@ ATTRIBUTE_KEYS = (
     "backpack",
     "bag",
     "handbag",
-    "upper_body_clothes_color",
-    "lower_body_clothes_color",
 )
-ATTRIBUTE_PROMPT = """Label every attribute of the main pedestrian in this image.
+ATTRIBUTE_PROMPT = """Label the main pedestrian in this image.
 If multiple people are visible, focus on the most prominent (largest/most central) person.
 If a body region is occluded or cropped, infer from whatever is visible.
 
 Return only a raw JSON object with these exact keys and text values:
 
 {
-  "gender":                    "male" | "female",
-  "hair":                      "short" | "long",
-  "age":                       "child" | "teenager" | "adult" | "old",
-  "clothing_type":             "dress" | "pants" | "shorts" | "skirt",
-  "upper_body_clothes":        "long sleeve" | "short sleeve",
-  "lower_body_clothes":        "long" | "short",
-  "hat":                       "no" | "yes",
-  "backpack":                  "no" | "yes",
-  "bag":                       "no" | "yes",
-  "handbag":                   "no" | "yes",
-  "upper_body_clothes_color":  "black" | "white" | "red" | "purple" | "gray" | "blue" | "green" | "yellow" | "pink" | "orange" | "brown",
-  "lower_body_clothes_color":  "black" | "white" | "pink" | "gray" | "blue" | "green" | "brown" | "yellow" | "purple" | "red"
+  "gender":               "male" | "female",
+  "hair":                 "short" | "long",
+  "clothing_type":        "dress" | "pants" | "shorts" | "skirt",
+  "upper_body_clothes":   "long sleeve" | "short sleeve",
+  "lower_body_clothes":   "long" | "short",
+  "hat":                  "no" | "yes",
+  "backpack":             "no" | "yes",
+  "bag":                  "no" | "yes",
+  "handbag":              "no" | "yes"
 }
 
-For upper_body_clothes_color and lower_body_clothes_color, choose the dominant color.
 No markdown, no explanation - raw JSON only."""
 
 

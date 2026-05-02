@@ -843,6 +843,50 @@ def get_run(run_id: str) -> dict:
     return run
 
 
+@router.get("/api/evals")
+def list_dataset_evals(limit: int = 20) -> list[dict[str, Any]]:
+    evals_root = RUNS_ROOT / "evals"
+    if not evals_root.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for manifest_path in evals_root.glob("*/*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        items.append(
+            {
+                "eval_id": manifest_path.parent.name,
+                "workflow": manifest.get("workflow") or manifest_path.parent.parent.name,
+                "row_count": manifest.get("row_count"),
+                "completed_run_count": manifest.get("completed_run_count"),
+                "eval_root": manifest_path.parent.as_posix(),
+                "manifest": manifest_path.as_posix(),
+                "artifacts": manifest.get("artifacts", {}),
+            }
+        )
+    items.sort(key=lambda item: item["eval_id"], reverse=True)
+    return items[: max(1, min(limit, 100))]
+
+
+@router.get("/api/evals/{workflow}/{eval_id}")
+def get_dataset_eval(workflow: str, eval_id: str) -> dict[str, Any]:
+    eval_root = RUNS_ROOT / "evals" / workflow / eval_id
+    summary_path = eval_root / "eval_summary.json"
+    if not summary_path.exists():
+        raise HTTPException(404, f"eval {workflow}/{eval_id!r} not found")
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, f"failed to read eval summary: {exc}")
+    return {
+        **summary,
+        "rows": _read_jsonl(eval_root / "rows.jsonl", limit=1000),
+        "failed_rows": _read_jsonl(eval_root / "failed_rows.jsonl", limit=1000),
+        "node_events": _read_jsonl(eval_root / "node_events.jsonl", limit=2000),
+    }
+
+
 def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
     try:
         run_dir = resolve_run_dir(runs_root, run_id)
@@ -903,6 +947,13 @@ def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
         "spans": spans,
         **artifact_paths(run_dir),
     }
+    out["audit_events"] = _read_jsonl(run_dir / "node_events.jsonl")
+    audit_path = run_dir / "audit.json"
+    if audit_path.exists():
+        try:
+            out["audit_summary"] = json.loads(audit_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            out["audit_summary"] = None
     approval_path = run_dir / "approval.json"
     if approval_path.exists():
         try:
@@ -979,6 +1030,25 @@ def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
 
     out.update(_approval_lifecycle(run_dir))
     return out
+
+
+def _read_jsonl(path: Path, *, limit: int = 500) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if len(rows) >= limit:
+                    break
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    rows.append(item)
+    except (OSError, json.JSONDecodeError):
+        return rows
+    return rows
 
 
 def _approval_lifecycle(run_dir: Path) -> dict[str, Any]:

@@ -26,7 +26,6 @@ class WorkflowState(TypedDict, total=False):
     research_notes: str
     dispatch_brief: str
     start_marker: str
-    fusion_weight_analysis: str
     specialist_a_notes: str
     specialist_b_notes: str
     retrieved_doc_ids: list[str]
@@ -57,7 +56,6 @@ class WorkflowState(TypedDict, total=False):
     reid_multimodal_embedding_ranked: list[str]
     rrf_merged_ranking: list[str]
     reciprocal_rank_fused_ranking: list[str]
-    ranked_gallery_pids_raw: str
     ranked_gallery_ids: list[str]
     ranked_gallery_pids: list[str] | str
 
@@ -87,7 +85,6 @@ def new_state(user_input: str) -> WorkflowState:
         research_notes="",
         dispatch_brief="",
         start_marker="",
-        fusion_weight_analysis="",
         specialist_a_notes="",
         specialist_b_notes="",
         retrieved_doc_ids=[],

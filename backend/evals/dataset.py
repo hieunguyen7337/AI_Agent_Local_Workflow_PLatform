@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import csv
 import json
-import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
@@ -13,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from backend.evals.metrics import summarize
 from backend.runtime.cancellation import CancellationController
+from backend.runtime.artifacts import AEST_UTC_OFFSET, make_eval_id
 from backend.runtime.functions import DEFAULT_MAX_CONCURRENCY, WorkflowBatchItem, run_workflow_batch
 
 
@@ -38,8 +38,9 @@ def run_dataset_eval(
     dataset_format = config.dataset_format or _infer_dataset_format(dataset_path)
     rows = load_dataset_rows(dataset_path, dataset_format)
 
-    eval_root = output_path.parent if output_path else runs_root / f"dataset_eval_{workflow}_{int(time.time())}"
-    output_path = output_path or eval_root / "eval.json"
+    suffix = _eval_suffix(rows)
+    eval_root = output_path.parent if output_path else runs_root / "evals" / workflow / make_eval_id(workflow, suffix=suffix)
+    output_path = output_path or eval_root / "eval_summary.json"
 
     input_states = [_map_input_state(row, config.input_mapping) for row in rows]
     batch_results = run_workflow_batch(
@@ -53,7 +54,11 @@ def run_dataset_eval(
             for index, input_state in enumerate(input_states)
         ],
         max_concurrency=max_concurrency or config.max_concurrency,
-        runs_root=eval_root / "runs",
+        runs_root=eval_root,
+        shared_run_dir=eval_root,
+        use_checkpointer=False,
+        write_manifest_files=False,
+        write_audit_summary=False,
         cancellation=cancellation,
     )
 
@@ -87,6 +92,7 @@ def run_dataset_eval(
                 "cost_usd": result.cost_usd,
                 "latency_ms": result.latency_ms,
                 "input_state": input_state,
+                "final_state": result.final_state,
                 "scorers": scorer_results,
             }
         )
@@ -107,8 +113,78 @@ def run_dataset_eval(
         "output_path": output_path.as_posix(),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    _write_eval_artifacts(eval_root=eval_root, summary_path=output_path, summary=out, workflow=workflow, rows=results)
     return out
+
+
+def _eval_suffix(rows: list[dict[str, Any]]) -> str:
+    if rows and isinstance(rows[0].get("gallery_ids"), list):
+        return f"{len(rows)}q_{len(rows[0]['gallery_ids'])}g"
+    return f"{len(rows)}rows"
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _write_eval_artifacts(
+    *,
+    eval_root: Path,
+    summary_path: Path,
+    summary: dict[str, Any],
+    workflow: str,
+    rows: list[dict[str, Any]],
+) -> None:
+    eval_root.mkdir(parents=True, exist_ok=True)
+    failed_rows = [row for row in rows if row.get("status") != "ok" or not row.get("pass")]
+    compact_rows = [
+        {
+            "row_index": row["row_index"],
+            "run_id": row["run_id"],
+            "status": row["status"],
+            "error": row["error"],
+            "pass": row["pass"],
+            "cost_usd": row["cost_usd"],
+            "latency_ms": row["latency_ms"],
+            "query_id": row["input_state"].get("user_input"),
+            "ranked_gallery_ids": row["final_state"].get("ranked_gallery_ids"),
+            "scorers": row["scorers"],
+        }
+        for row in rows
+    ]
+    rows_path = eval_root / "rows.jsonl"
+    failed_path = eval_root / "failed_rows.jsonl"
+    manifest_path = eval_root / "manifest.json"
+    summary["artifacts"] = {
+        "eval_root": eval_root.as_posix(),
+        "eval_summary": summary_path.as_posix(),
+        "rows_jsonl": rows_path.as_posix(),
+        "failed_rows_jsonl": failed_path.as_posix(),
+        "node_events_jsonl": (eval_root / "node_events.jsonl").as_posix(),
+        "manifest": manifest_path.as_posix(),
+        "telemetry_db": (eval_root / "telemetry.db").as_posix(),
+    }
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_jsonl(rows_path, compact_rows)
+    _write_jsonl(failed_path, [row for row in compact_rows if row["status"] != "ok" or not row["pass"]])
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "workflow": workflow,
+                "kind": "dataset_eval",
+                "timezone": "AEST",
+                "utc_offset": AEST_UTC_OFFSET,
+                "row_count": summary["row_count"],
+                "completed_run_count": summary["completed_run_count"],
+                "artifacts": summary["artifacts"],
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
 
 def load_dataset_eval_config(path: Path) -> DatasetEvalConfig:

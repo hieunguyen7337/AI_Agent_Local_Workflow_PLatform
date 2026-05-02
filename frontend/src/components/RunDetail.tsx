@@ -19,8 +19,8 @@ export default function RunDetail({
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
 
   const q = useQuery({ queryKey: ["run", runId], queryFn: () => fetchRun(runId) });
-  if (q.isLoading) return <div className="p-4 text-sm text-gray-500">Loading run...</div>;
-  if (q.error) return <div className="p-4 text-sm text-red-700">Error loading run</div>;
+  if (q.isLoading) return <div className="p-4 text-sm text-slate-400">Loading run...</div>;
+  if (q.error) return <div className="p-4 text-sm text-red-400">Error loading run</div>;
   const run = q.data;
   if (!run) return null;
 
@@ -58,20 +58,20 @@ export default function RunDetail({
   return (
     <div className="h-full overflow-y-auto p-4 text-sm space-y-3">
       <div>
-        <div className="text-xs uppercase text-gray-500">Run</div>
+        <div className="text-xs uppercase text-slate-400">Run</div>
         <div className="font-mono text-xs">{run.run_id}</div>
       </div>
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <div className="text-xs text-gray-500">Status</div>
+          <div className="text-xs text-slate-400">Status</div>
           <div>{displayStatus}</div>
-          {displayStatus !== run.status && <div className="text-[11px] text-gray-500">raw: {run.status}</div>}
+          {displayStatus !== run.status && <div className="text-[11px] text-slate-500">raw: {run.status}</div>}
         </div>
-        <div><div className="text-xs text-gray-500">Cost</div><div>${run.cost_usd?.toFixed(4) ?? "-"}</div></div>
-        <div><div className="text-xs text-gray-500">Latency</div><div>{run.latency_ms?.toFixed(0) ?? "-"} ms</div></div>
+        <div><div className="text-xs text-slate-400">Cost</div><div>${run.cost_usd?.toFixed(4) ?? "-"}</div></div>
+        <div><div className="text-xs text-slate-400">Latency</div><div>{run.latency_ms?.toFixed(0) ?? "-"} ms</div></div>
       </div>
       {approvalDecision && run.continuation_run_id && (
-        <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+        <div className="rounded border border-emerald-700 bg-emerald-900/30 p-3 text-xs text-emerald-300">
           Approval {approvalDecision.decision}; continued as{" "}
           <button
             type="button"
@@ -84,9 +84,9 @@ export default function RunDetail({
         </div>
       )}
       {run.error && (
-        <div className="p-2 rounded bg-red-50 text-red-800 text-xs whitespace-pre-wrap">{run.error}</div>
+        <div className="p-2 rounded bg-red-900/30 text-red-400 text-xs whitespace-pre-wrap">{run.error}</div>
       )}
-      <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 space-y-1">
+      <div className="rounded border border-slate-700 bg-slate-800 p-3 text-xs text-slate-200 space-y-1">
         <div className="flex items-center justify-between gap-3">
           <div className="font-medium">Artifacts</div>
           <div className="text-[11px] text-slate-500">Guide: docs/run_artifacts.md</div>
@@ -94,29 +94,51 @@ export default function RunDetail({
         <ArtifactPath label="Run dir" value={run.run_dir} />
         <ArtifactPath label="Manifest" value={run.manifest} />
         <ArtifactPath label="Telemetry DB" value={run.telemetry_db} />
-        <ArtifactPath label="Checkpoints DB" value={run.checkpoints_db} />
+        <ArtifactPath label="Internal replay checkpoint" value={run.checkpoints_db} />
         <ArtifactPath label="Spans JSONL" value={run.spans_jsonl} />
+        <ArtifactPath label="Audit JSON" value={run.audit} />
+        <ArtifactPath label="Node events JSONL" value={run.node_events} />
       </div>
+      {run.audit_events && run.audit_events.length > 0 && (
+        <div>
+          <div className="text-xs uppercase text-slate-400 mb-1">Node Audit</div>
+          <div className="space-y-2">
+            {run.audit_events.map((event: any, index: number) => (
+              <details key={`${event.node_id ?? "node"}-${index}`} className="rounded border border-slate-700 bg-slate-800 p-2">
+                <summary className="cursor-pointer text-xs">
+                  <span className="font-mono">{event.node_id ?? event.name ?? "node"}</span>
+                  <span className="ml-2 text-slate-500">{event.node_kind ?? ""}</span>
+                  <span className="ml-2 text-slate-500">{event.status ?? ""}</span>
+                  {event.latency_ms != null && <span className="ml-2 text-slate-500">{Number(event.latency_ms).toFixed(0)}ms</span>}
+                </summary>
+                <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-900 p-2 text-[11px] text-slate-300">
+                  {JSON.stringify(event, null, 2)}
+                </pre>
+              </details>
+            ))}
+          </div>
+        </div>
+      )}
       {run.approval && (
-        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
+        <div className="rounded border border-amber-700 bg-amber-900/30 p-3 text-xs text-amber-300 space-y-2">
           <div className="font-medium">{approvalPanelTitle}</div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <div className="uppercase text-amber-700">Node</div>
+              <div className="uppercase text-amber-400">Node</div>
               <div className="font-mono">{run.approval.node_id}</div>
             </div>
             <div>
-              <div className="uppercase text-amber-700">Created</div>
+              <div className="uppercase text-amber-400">Created</div>
               <div>{run.approval.created_ns ? new Date(run.approval.created_ns / 1_000_000).toLocaleString() : "-"}</div>
             </div>
           </div>
           <div>
-            <div className="uppercase text-amber-700">Prompt</div>
+            <div className="uppercase text-amber-400">Prompt</div>
             <div className="whitespace-pre-wrap">{run.approval.prompt}</div>
           </div>
-          <div className="font-mono text-[11px] text-amber-800">{run.approval.artifact_path}</div>
+          <div className="font-mono text-[11px] text-amber-400">{run.approval.artifact_path}</div>
           {approvalDecision && (
-            <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-emerald-900 space-y-1">
+            <div className="rounded border border-emerald-700 bg-emerald-900/30 p-2 text-emerald-300 space-y-1">
               <div className="font-medium">Decision: {approvalDecision.decision}</div>
               <div>
                 Continuation:{" "}
@@ -133,20 +155,20 @@ export default function RunDetail({
             </div>
           )}
           {canDecide && (
-            <div className="space-y-2 rounded border border-amber-200 bg-white p-2">
+            <div className="space-y-2 rounded border border-amber-700 bg-slate-900 p-2">
               <div className="font-medium">Record decision and fork continuation</div>
               <label className="block space-y-1">
-                <div className="uppercase text-amber-700">Reviewer</div>
+                <div className="uppercase text-amber-400">Reviewer</div>
                 <input
-                  className="w-full rounded border border-amber-200 p-1.5 text-xs"
+                  className="w-full rounded border border-amber-700 bg-slate-800 text-slate-100 p-1.5 text-xs"
                   value={reviewer}
                   onChange={(event) => setReviewer(event.target.value)}
                 />
               </label>
               <label className="block space-y-1">
-                <div className="uppercase text-amber-700">Comment</div>
+                <div className="uppercase text-amber-400">Comment</div>
                 <textarea
-                  className="h-16 w-full resize-none rounded border border-amber-200 p-1.5 text-xs"
+                  className="h-16 w-full resize-none rounded border border-amber-700 bg-slate-800 text-slate-100 p-1.5 text-xs"
                   value={comment}
                   onChange={(event) => setComment(event.target.value)}
                 />
@@ -163,7 +185,7 @@ export default function RunDetail({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  className="rounded border border-emerald-700 bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                  className="rounded border border-emerald-700 bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:border-slate-700"
                   disabled={!confirmed || isSubmittingDecision}
                   onClick={() => submitDecision("approved")}
                 >
@@ -171,7 +193,7 @@ export default function RunDetail({
                 </button>
                 <button
                   type="button"
-                  className="rounded border border-red-700 bg-red-700 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                  className="rounded border border-red-700 bg-red-700 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:border-slate-700"
                   disabled={!confirmed || isSubmittingDecision}
                   onClick={() => submitDecision("rejected")}
                 >
@@ -181,12 +203,12 @@ export default function RunDetail({
             </div>
           )}
           {decisionError && (
-            <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+            <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-2 text-xs text-red-400">
               {decisionError}
             </div>
           )}
           {decisionResult && (
-            <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-900">
+            <div className="rounded border border-emerald-700 bg-emerald-900/30 p-2 text-xs text-emerald-300">
               Forked continuation <span className="font-mono">{decisionResult.continuation_run_id}</span> with status{" "}
               {decisionResult.continuation_status}.
             </div>
@@ -194,7 +216,7 @@ export default function RunDetail({
         </div>
       )}
       {approvalResume && (
-        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 space-y-2">
+        <div className="rounded border border-blue-700 bg-blue-900/30 p-3 text-xs text-blue-300 space-y-2">
           <div className="font-medium">Approval continuation</div>
           <div>
             Source run:{" "}
@@ -212,10 +234,10 @@ export default function RunDetail({
         </div>
       )}
       {run.subgraphs && run.subgraphs.length > 0 && (
-        <div className="rounded border border-violet-200 bg-violet-50 p-3 text-xs text-violet-950 space-y-2">
+        <div className="rounded border border-violet-700 bg-violet-900/20 p-3 text-xs text-violet-300 space-y-2">
           <div className="font-medium">Subgraph child runs</div>
           {run.subgraphs.map((item: SubgraphLineage) => (
-            <div key={`${item.node_id}-${item.child_run_id}`} className="rounded border border-violet-200 bg-white p-2 space-y-1">
+            <div key={`${item.node_id}-${item.child_run_id}`} className="rounded border border-violet-700 bg-slate-800 p-2 space-y-1">
               <div>
                 Node <span className="font-mono">{item.node_id}</span> ran{" "}
                 <span className="font-mono">{item.child_workflow}</span>
@@ -241,7 +263,7 @@ export default function RunDetail({
         </div>
       )}
       {run.parent_run && (
-        <div className="rounded border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950 space-y-2">
+        <div className="rounded border border-indigo-700 bg-indigo-900/30 p-3 text-xs text-indigo-300 space-y-2">
           <div className="font-medium">Subgraph parent run</div>
           <div>
             Parent run:{" "}
@@ -279,15 +301,15 @@ export default function RunDetail({
         />
       )}
       <div>
-        <div className="text-xs uppercase text-gray-500 mb-1">Spans</div>
+        <div className="text-xs uppercase text-slate-400 mb-1">Spans</div>
         <div className="space-y-1">
           {run.spans?.map((s: any) => (
-            <div key={s.span_id} className="flex text-xs justify-between border-b py-1">
+            <div key={s.span_id} className="flex text-xs justify-between border-b border-slate-700 py-1">
               <div>
                 <span className="font-mono">{s.name}</span>
-                {s.iteration ? <span className="ml-2 text-gray-400">#{s.iteration}</span> : null}
+                {s.iteration ? <span className="ml-2 text-slate-500">#{s.iteration}</span> : null}
               </div>
-              <div className="text-gray-500">
+              <div className="text-slate-400">
                 {s.duration_ms?.toFixed(0)}ms
                 {s.cost_usd != null ? ` - $${s.cost_usd.toFixed(4)}` : ""}
               </div>
@@ -307,7 +329,7 @@ function PendingChildApprovalPanel({
   onSelectRun?: (runId: string) => void;
 }) {
   return (
-    <div className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 space-y-2">
+    <div className="rounded border border-amber-700 bg-amber-900/30 p-3 text-xs text-amber-300 space-y-2">
       <div className="font-medium">Pending child approval</div>
       <div>
         Subgraph node <span className="font-mono">{psa.node_id}</span> launched{" "}
@@ -336,7 +358,7 @@ function SubgraphDecisionPanel({
   onSelectRun?: (runId: string) => void;
 }) {
   return (
-    <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-2">
+    <div className="rounded border border-emerald-700 bg-emerald-900/30 p-3 text-xs text-emerald-300 space-y-2">
       <div className="font-medium">Subgraph approval decided</div>
       <div>
         Node <span className="font-mono">{sd.subgraph_node_id}</span> — decision:{" "}
@@ -363,7 +385,7 @@ function SubgraphDecisionPanel({
             {sd.parent_continuation_run_id}
           </button>
           {sd.parent_continuation_status && (
-            <span className="ml-1 text-emerald-700">({sd.parent_continuation_status})</span>
+            <span className="ml-1 text-emerald-400">({sd.parent_continuation_status})</span>
           )}
         </div>
       )}
@@ -380,7 +402,7 @@ function SubgraphResumePanel({
   onSelectRun?: (runId: string) => void;
 }) {
   return (
-    <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 space-y-2">
+    <div className="rounded border border-blue-700 bg-blue-900/30 p-3 text-xs text-blue-300 space-y-2">
       <div className="font-medium">Subgraph continuation</div>
       <div>
         Source parent run:{" "}

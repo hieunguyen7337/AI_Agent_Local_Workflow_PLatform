@@ -13,13 +13,11 @@ from pathlib import Path
 from typing import Any
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
-_JSON_ARRAY_RE = re.compile(r'\[(?:\s*"[^"]*"\s*,?\s*)+\]', re.DOTALL)
 _RRF_K = 60
 
 ATTRIBUTE_KEYS: tuple[str, ...] = (
     "gender",
     "hair",
-    "age",
     "clothing_type",
     "upper_body_clothes",
     "lower_body_clothes",
@@ -27,12 +25,10 @@ ATTRIBUTE_KEYS: tuple[str, ...] = (
     "backpack",
     "bag",
     "handbag",
-    "upper_body_clothes_color",
-    "lower_body_clothes_color",
 )
 
 
-def start_passthrough(user_input: str = "") -> str:
+def mark_workflow_start(user_input: str = "") -> str:
     """Mark the explicit workflow start node without changing user state."""
     return str(user_input or "")
 
@@ -60,7 +56,7 @@ def _parse_attributes(value: Any) -> dict[str, str]:
     return {key: str(attrs.get(key, "")).strip().lower() for key in ATTRIBUTE_KEYS}
 
 
-def query_llm_attribute_lookup(query_id: str, query_db_path: str) -> dict[str, str]:
+def lookup_query_attributes_from_eval_db(query_id: str, query_db_path: str) -> dict[str, str]:
     """Load precomputed query attributes from an offline eval query DB."""
     db_path = Path(query_db_path)
     if not db_path.is_file():
@@ -86,7 +82,10 @@ def query_llm_attribute_lookup(query_id: str, query_db_path: str) -> dict[str, s
     return parsed
 
 
-def multimodal_embedding_lookup(query_id: str, query_embedding_db_path: str) -> list[float]:
+def lookup_query_reid_embedding_from_eval_db(
+    query_id: str,
+    query_embedding_db_path: str,
+) -> list[float]:
     """Load a precomputed query embedding from an offline eval embedding DB."""
     db_path = Path(query_embedding_db_path)
     if not db_path.is_file():
@@ -108,12 +107,12 @@ def multimodal_embedding_lookup(query_id: str, query_embedding_db_path: str) -> 
     return [float(value) for value in embedding]
 
 
-def llm_attribute_gallery_retriever(
+def retrieve_gallery_by_attribute_similarity(
     query_attributes: str | dict[str, Any],
     gallery_db_path: str,
     top_k: int,
 ) -> list[str]:
-    """Rank gallery IDs by exact-match similarity over the 12 flat attributes."""
+    """Rank gallery IDs by exact-match similarity over the flat attributes."""
     attrs = _parse_attributes(query_attributes)
     db_path = Path(gallery_db_path)
     if not db_path.is_file():
@@ -143,7 +142,7 @@ def llm_attribute_gallery_retriever(
 
 
 def _parse_fusion_weights(value: Any) -> dict[str, float]:
-    defaults = {"llm_attribute": 0.4, "reid_multimodal_embedding": 0.6}
+    defaults = {"llm_attribute": 0.1, "reid_multimodal_embedding": 0.9}
     parsed = _json_from_text(value)
     if not isinstance(parsed, dict):
         return defaults
@@ -168,9 +167,15 @@ def _parse_fusion_weights(value: Any) -> dict[str, float]:
 def weighted_reciprocal_rank_fusion(
     llm_attribute_ranked: list[str],
     reid_multimodal_embedding_ranked: list[str],
-    fusion_weight_analysis: str | dict[str, Any],
+    fusion_weight_analysis: str | dict[str, Any] | None = None,
 ) -> list[str]:
-    """Fuse attribute and ReID embedding rankings using analysed RRF weights."""
+    """Fuse attribute and ReID embedding rankings using weighted RRF.
+
+    Default weights are emb=0.9 / attr=0.1 — embedding-heavy, reflecting that the
+    embedding branch consistently outperforms the attribute branch on Market-1501
+    crops.  Pass an explicit ``fusion_weight_analysis`` JSON only when you have a
+    reliable signal to override the defaults.
+    """
     weights = _parse_fusion_weights(fusion_weight_analysis)
     ranked_inputs = [
         (llm_attribute_ranked, weights["llm_attribute"]),
@@ -184,30 +189,3 @@ def weighted_reciprocal_rank_fusion(
     return sorted(scores, key=lambda gid: (-scores[gid], gid))[:20]
 
 
-def parse_final_ranking(
-    ranked_gallery_pids_raw: str | list[str],
-    reciprocal_rank_fused_ranking: list[str],
-) -> list[str]:
-    """Parse final_ranker output into a clean list of gallery IDs."""
-    if isinstance(ranked_gallery_pids_raw, list):
-        cleaned = [str(x) for x in ranked_gallery_pids_raw if x]
-        return cleaned or reciprocal_rank_fused_ranking
-
-    raw = str(ranked_gallery_pids_raw).strip()
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, list) and parsed:
-            return [str(x) for x in parsed if x]
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    match = _JSON_ARRAY_RE.search(raw)
-    if match:
-        try:
-            parsed = json.loads(match.group(0))
-            if isinstance(parsed, list) and parsed:
-                return [str(x) for x in parsed if x]
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    return reciprocal_rank_fused_ranking

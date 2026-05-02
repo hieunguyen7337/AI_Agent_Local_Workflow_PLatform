@@ -9,6 +9,7 @@ import yaml
 from opentelemetry.trace import Status, StatusCode
 
 from backend.builder.nodes import RetrieverNodeConfig
+from backend.runtime.audit import AuditRecorder, audit_preview
 from backend.runtime.state import WorkflowState
 from backend.telemetry.genai_attrs import WORKFLOW_LATENCY_MS, WORKFLOW_STATUS, node_attrs
 from backend.telemetry.tracer import get_tracer
@@ -21,6 +22,7 @@ def make_retriever_node(
     *,
     run_id: str,
     graph_name: str,
+    audit: AuditRecorder | None = None,
 ):
     tracer = get_tracer()
 
@@ -43,12 +45,30 @@ def make_retriever_node(
                 span.set_attribute(WORKFLOW_LATENCY_MS, latency_ms)
                 span.set_attribute(WORKFLOW_STATUS, "HIT" if top_docs else "MISS")
                 span.set_status(Status(StatusCode.OK))
+                if audit is not None:
+                    audit.write_event(
+                        {
+                            "node_id": cfg.id,
+                            "node_kind": "retriever",
+                            "status": "ok",
+                            "corpus_path": cfg.corpus_path,
+                            "query_state_key": cfg.query_state_key,
+                            "query": audit_preview(query),
+                            "top_k": cfg.top_k,
+                            "output_state_key": cfg.output_state_key,
+                            "output": audit_preview(context),
+                            "retrieved_doc_ids": [d["id"] for d in top_docs],
+                            "latency_ms": latency_ms,
+                        }
+                    )
                 return {
                     cfg.output_state_key: context,
                     "retrieved_doc_ids": [d["id"] for d in top_docs],
                 }
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
+                if audit is not None:
+                    audit.write_event({"node_id": cfg.id, "node_kind": "retriever", "status": "error", "error": f"{type(e).__name__}: {e}"})
                 raise
 
     _node.__name__ = f"retriever_{cfg.id}"
@@ -97,4 +117,3 @@ def _retrieve_docs(*, query: str, docs: list[dict[str, str]], top_k: int) -> lis
 
 def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
-

@@ -29,14 +29,14 @@ export default function ApprovalWorkbench({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="border-b flex text-xs">
+      <div className="border-b border-slate-700 flex text-xs">
         {(["pending", "decided"] as ApprovalTab[]).map((item) => (
           <button
             key={item}
             type="button"
             className={[
-              "px-3 py-2 border-r capitalize",
-              tab === item ? "bg-amber-50 text-amber-900 font-medium" : "bg-white text-gray-500",
+              "px-3 py-2 border-r border-slate-700 capitalize",
+              tab === item ? "bg-amber-900/30 text-amber-300 font-medium" : "bg-slate-900 text-slate-400",
             ].join(" ")}
             onClick={() => setTab(item)}
           >
@@ -45,10 +45,10 @@ export default function ApprovalWorkbench({
         ))}
       </div>
       <div className="flex-1 overflow-y-auto">
-        {q.isLoading && <div className="p-3 text-sm text-gray-500">Loading approvals...</div>}
-        {q.error && <div className="p-3 text-sm text-red-700">Error loading approvals</div>}
+        {q.isLoading && <div className="p-3 text-sm text-slate-400">Loading approvals...</div>}
+        {q.error && <div className="p-3 text-sm text-red-400">Error loading approvals</div>}
         {!q.isLoading && !q.error && (q.data ?? []).length === 0 && (
-          <div className="p-3 text-sm text-gray-500">No {tab} approvals.</div>
+          <div className="p-3 text-sm text-slate-400">No {tab} approvals.</div>
         )}
         <div className="divide-y">
           {(q.data ?? []).map((approval) => (
@@ -108,11 +108,11 @@ function ApprovalItem({
   }
 
   return (
-    <div className={["p-3 text-xs space-y-2", selected ? "bg-blue-50" : "bg-white"].join(" ")}>
+    <div className={["p-3 text-xs space-y-2", selected ? "bg-blue-900/20" : "bg-slate-900"].join(" ")}>
       <div className="flex items-start justify-between gap-2">
         <button
           type="button"
-          className="text-left font-mono text-[11px] text-slate-800 hover:underline"
+          className="text-left font-mono text-[11px] text-slate-200 hover:underline"
           onClick={() => onSelectRun(approval.run_id)}
         >
           {approval.run_id}
@@ -120,21 +120,21 @@ function ApprovalItem({
         <span
           className={[
             "rounded px-2 py-0.5",
-            approval.status === "pending" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800",
+            approval.status === "pending" ? "bg-amber-900/30 text-amber-300" : "bg-emerald-900/30 text-emerald-400",
           ].join(" ")}
         >
           {approval.status}
         </span>
       </div>
-      <div className="text-slate-700">
+      <div className="text-slate-300">
         <span className="font-medium">{approval.workflow}</span> /{" "}
         <span className="font-mono">{approval.node_id}</span>
       </div>
-      <div className="text-slate-600">{preview(approval.prompt)}</div>
+      <div className="text-slate-400">{preview(approval.prompt)}</div>
       <div className="text-slate-500">{fmtTime(approval.created_ns)}</div>
       {canDecide && (
-        <div className="rounded border border-amber-200 bg-amber-50 p-2 space-y-2">
-          <label className="flex items-start gap-2 text-amber-950">
+        <div className="rounded border border-amber-700 bg-amber-900/30 p-2 space-y-2">
+          <label className="flex items-start gap-2 text-amber-300">
             <input
               className="mt-0.5"
               type="checkbox"
@@ -146,7 +146,7 @@ function ApprovalItem({
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white disabled:bg-slate-300"
+              className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white disabled:bg-slate-700"
               disabled={!confirmed || mutation.isPending}
               onClick={() => submitDecision("approved")}
             >
@@ -154,18 +154,18 @@ function ApprovalItem({
             </button>
             <button
               type="button"
-              className="rounded bg-red-700 px-3 py-1 text-xs font-medium text-white disabled:bg-slate-300"
+              className="rounded bg-red-700 px-3 py-1 text-xs font-medium text-white disabled:bg-slate-700"
               disabled={!confirmed || mutation.isPending}
               onClick={() => submitDecision("rejected")}
             >
               {mutation.isPending ? "Submitting..." : "Reject"}
             </button>
           </div>
-          {error && <div className="whitespace-pre-wrap text-red-700">{error}</div>}
+          {error && <div className="whitespace-pre-wrap text-red-400">{error}</div>}
         </div>
       )}
       {decision && (
-        <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-emerald-900 space-y-1">
+        <div className="rounded border border-emerald-700 bg-emerald-900/30 p-2 text-emerald-300 space-y-1">
           <div>
             Decision: <span className="font-medium">{decision.decision}</span>
             {decision.reviewer ? ` by ${decision.reviewer}` : ""}
@@ -173,7 +173,7 @@ function ApprovalItem({
           <div>Status: {decision.continuation_status}</div>
           <button
             type="button"
-            className="font-mono text-[11px] text-emerald-900 hover:underline"
+            className="font-mono text-[11px] text-emerald-400 hover:underline"
             onClick={() => onSelectRun(decision.continuation_run_id)}
           >
             {decision.continuation_run_id}

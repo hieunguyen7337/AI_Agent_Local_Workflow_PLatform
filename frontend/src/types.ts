@@ -431,6 +431,10 @@ export interface SubgraphLineage {
 
 export interface RunDetailResponse extends RunSummary {
   spans: Array<Record<string, any>>;
+  audit?: string;
+  node_events?: string;
+  audit_summary?: Record<string, any> | null;
+  audit_events?: Array<Record<string, any>>;
   approval?: ApprovalSummary | null;
   approval_decision?: ApprovalSummary["approval_decision"] | null;
   approval_resume?: {
@@ -447,4 +451,26 @@ export interface RunDetailResponse extends RunSummary {
   pending_child_run_id?: string | null;
   parent_continuation_run_id?: string | null;
   parent_continuation_status?: string | null;
+}
+
+export interface DatasetEvalSummary {
+  eval_id: string;
+  workflow: string;
+  row_count?: number;
+  completed_run_count?: number;
+  eval_root: string;
+  manifest: string;
+  artifacts?: Record<string, string>;
+}
+
+export interface DatasetEvalDetail {
+  workflow: string;
+  status: string;
+  row_count: number;
+  completed_run_count: number;
+  overall: Record<string, number>;
+  artifacts?: Record<string, string>;
+  rows: Array<Record<string, any>>;
+  failed_rows: Array<Record<string, any>>;
+  node_events: Array<Record<string, any>>;
 }

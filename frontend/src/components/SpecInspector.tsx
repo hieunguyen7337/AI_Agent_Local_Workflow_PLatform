@@ -44,9 +44,9 @@ function Field({ label, value, mono = false, pre = false }: { label: string; val
       <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
       <div
         className={[
-          "text-xs text-slate-800",
+          "text-xs text-slate-200",
           mono ? "font-mono" : "",
-          pre ? "whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 leading-relaxed" : "break-words",
+          pre ? "whitespace-pre-wrap rounded border border-slate-700 bg-slate-800 p-2 leading-relaxed" : "break-words",
         ].join(" ")}
       >
         {text}
@@ -493,20 +493,20 @@ export default function SpecInspector({
   const tabs = availableTabs ?? (["node", "source", "validation", "propose", "rollback"] as InspectorTab[]);
 
   return (
-    <div className="h-full flex flex-col bg-white">
-      <div className="border-b px-3 py-2">
-        <div className="text-xs uppercase text-slate-500">{title}</div>
-        <div className="text-sm font-semibold text-slate-800">{spec?.workflow ?? topology?.name ?? "-"}</div>
+    <div className="h-full flex flex-col bg-slate-950">
+      <div className="border-b border-slate-700 px-3 py-2">
+        <div className="text-xs uppercase text-slate-400">{title}</div>
+        <div className="text-sm font-semibold text-slate-100">{spec?.workflow ?? topology?.name ?? "-"}</div>
       </div>
       {tabs.length > 1 && (
-        <div className="border-b flex text-xs">
+        <div className="border-b border-slate-700 flex text-xs">
           {tabs.map((item) => (
             <button
               key={item}
               type="button"
               className={[
-                "px-3 py-2 border-r capitalize",
-                tab === item ? "bg-slate-100 text-slate-900 font-medium" : "bg-white text-slate-500",
+                "px-3 py-2 border-r border-slate-700 capitalize",
+                tab === item ? "bg-slate-700 text-slate-100 font-medium" : "bg-slate-950 text-slate-400",
               ].join(" ")}
               onClick={() => onTabChange(item)}
             >
@@ -519,24 +519,24 @@ export default function SpecInspector({
         {tab === "node" && (
           <div className="space-y-3">
             {spec?.spec.template && (
-              <div className="space-y-3 rounded border border-violet-200 bg-violet-50 p-3">
+              <div className="space-y-3 rounded border border-violet-700 bg-violet-900/20 p-3">
                 <div>
-                  <div className="text-xs font-medium text-violet-950">Copy template</div>
-                  <div className="text-xs text-violet-900">
+                  <div className="text-xs font-medium text-violet-200">Copy template</div>
+                  <div className="text-xs text-violet-300">
                     Copy this YAML template into a new canonical workflow. The copy is written with template: false.
                   </div>
-                  <div className="mt-1 text-xs text-violet-900">
+                  <div className="mt-1 text-xs text-violet-300">
                     Prompt placeholders such as {"{user_input}"} are copied unchanged; customize them after copy through the normal source or proposal flow.
                   </div>
                 </div>
                 {spec.spec.template_parameters.length > 0 && (
-                  <div className="space-y-2 rounded border border-violet-200 bg-white p-2">
-                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Expected inputs</div>
+                  <div className="space-y-2 rounded border border-violet-700 bg-slate-800 p-2">
+                    <div className="text-[11px] uppercase tracking-wide text-violet-400">Expected inputs</div>
                     <div className="space-y-2">
                       {spec.spec.template_parameters.map((parameter) => (
-                        <div key={parameter.key} className="text-xs text-slate-800">
-                          <div className="font-mono font-medium text-violet-950">{parameter.key}</div>
-                          <div className="text-slate-700">{parameter.description}</div>
+                        <div key={parameter.key} className="text-xs text-slate-200">
+                          <div className="font-mono font-medium text-violet-300">{parameter.key}</div>
+                          <div className="text-slate-300">{parameter.description}</div>
                           {(parameter.state_key || parameter.example) && (
                             <div className="mt-1 font-mono text-[11px] text-slate-500">
                               {parameter.state_key ? `state: ${parameter.state_key}` : ""}
@@ -551,22 +551,22 @@ export default function SpecInspector({
                 )}
                 <div className="grid grid-cols-2 gap-2">
                   <label className="space-y-1">
-                    <div className="text-[11px] uppercase tracking-wide text-violet-700">New workflow id</div>
+                    <div className="text-[11px] uppercase tracking-wide text-violet-400">New workflow id</div>
                     <input
                       className={[
-                        "w-full rounded border bg-white p-1.5 text-xs",
-                        copyWorkflowIdError ? "border-red-300" : "border-violet-200",
+                        "w-full rounded border bg-slate-800 text-slate-100 p-1.5 text-xs",
+                        copyWorkflowIdError ? "border-red-500" : "border-violet-600",
                       ].join(" ")}
                       value={copyWorkflowId}
                       onChange={(event) => setCopyWorkflowId(event.target.value)}
                       placeholder="my_new_workflow"
                     />
-                    {copyWorkflowIdError && <div className="text-xs text-red-700">{copyWorkflowIdError}</div>}
+                    {copyWorkflowIdError && <div className="text-xs text-red-400">{copyWorkflowIdError}</div>}
                   </label>
                   <label className="space-y-1">
-                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Accepted by</div>
+                    <div className="text-[11px] uppercase tracking-wide text-violet-400">Accepted by</div>
                     <input
-                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      className="w-full rounded border border-violet-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                       value={copyAcceptedBy}
                       onChange={(event) => setCopyAcceptedBy(event.target.value)}
                     />
@@ -574,18 +574,18 @@ export default function SpecInspector({
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="space-y-1">
-                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Name</div>
+                    <div className="text-[11px] uppercase tracking-wide text-violet-400">Name</div>
                     <input
-                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      className="w-full rounded border border-violet-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                       value={copyName}
                       onChange={(event) => setCopyName(event.target.value)}
                       placeholder="defaults to workflow id"
                     />
                   </label>
                   <label className="space-y-1">
-                    <div className="text-[11px] uppercase tracking-wide text-violet-700">Category</div>
+                    <div className="text-[11px] uppercase tracking-wide text-violet-400">Category</div>
                     <input
-                      className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                      className="w-full rounded border border-violet-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                       value={copyCategory}
                       onChange={(event) => setCopyCategory(event.target.value)}
                       placeholder="defaults to template category"
@@ -593,24 +593,24 @@ export default function SpecInspector({
                   </label>
                 </div>
                 <label className="space-y-1 block">
-                  <div className="text-[11px] uppercase tracking-wide text-violet-700">Description</div>
+                  <div className="text-[11px] uppercase tracking-wide text-violet-400">Description</div>
                   <textarea
-                    className="h-14 w-full resize-none rounded border border-violet-200 bg-white p-1.5 text-xs"
+                    className="h-14 w-full resize-none rounded border border-violet-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                     value={copyDescription}
                     onChange={(event) => setCopyDescription(event.target.value)}
                     placeholder="defaults to template description"
                   />
                 </label>
                 <label className="space-y-1 block">
-                  <div className="text-[11px] uppercase tracking-wide text-violet-700">Tags</div>
+                  <div className="text-[11px] uppercase tracking-wide text-violet-400">Tags</div>
                   <input
-                    className="w-full rounded border border-violet-200 bg-white p-1.5 text-xs"
+                    className="w-full rounded border border-violet-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                     value={copyTags}
                     onChange={(event) => setCopyTags(event.target.value)}
                     placeholder="comma-separated, defaults to template tags"
                   />
                 </label>
-                <label className="flex items-start gap-2 text-xs text-violet-950">
+                <label className="flex items-start gap-2 text-xs text-violet-200">
                   <input
                     className="mt-0.5"
                     type="checkbox"
@@ -621,19 +621,19 @@ export default function SpecInspector({
                 </label>
                 <button
                   type="button"
-                  className="w-fit rounded border border-violet-900 bg-violet-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                  className="w-fit rounded border border-violet-500 bg-violet-700 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:border-slate-700"
                   disabled={!canCopyTemplate}
                   onClick={submitTemplateCopy}
                 >
                   {isCopyingTemplate ? "Copying..." : "Copy template"}
                 </button>
                 {copyError && (
-                  <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                     {copyError}
                   </div>
                 )}
                 {copyResult && (
-                  <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                  <div className="space-y-2 rounded border border-emerald-700 bg-emerald-900/30 p-3 text-xs text-emerald-300">
                     <div className="font-medium">Copied to {copyResult.workflow}</div>
                     <div>
                       This is now a normal template: false workflow. Customize prompts and metadata through source review or the proposal flow.
@@ -647,13 +647,13 @@ export default function SpecInspector({
             {!selectedNode && <div className="text-sm text-slate-500">Select a graph node to inspect its source metadata.</div>}
             {selectedNode && nodeFields(selectedNode).map((field) => <Field key={field.label} {...field} />)}
             {selectedSubgraphWorkflow && (
-              <div className="space-y-3 rounded border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs text-slate-700">
+              <div className="space-y-3 rounded border border-slate-700 bg-slate-900 p-3">
+                <div className="text-xs text-slate-400">
                   Subgraph v1 supports acyclic, non-approval child workflows. Nested approval resume is deferred.
                 </div>
                 <button
                   type="button"
-                  className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800"
+                  className="rounded border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-200"
                   onClick={() =>
                     setOpenedChildWorkflow(
                       openedChildWorkflow === selectedSubgraphWorkflow ? undefined : selectedSubgraphWorkflow
@@ -665,9 +665,9 @@ export default function SpecInspector({
                 {childWorkflow && (
                   <div className="space-y-3">
                     {childTopology.isLoading && <div className="text-xs text-slate-500">Loading child graph...</div>}
-                    {childTopology.error && <div className="text-xs text-red-700">Error loading child graph.</div>}
+                    {childTopology.error && <div className="text-xs text-red-400">Error loading child graph.</div>}
                     {childTopology.data && (
-                      <div className="h-72 rounded border border-slate-200 bg-white">
+                      <div className="h-72 rounded border border-slate-700 bg-slate-950">
                         <GraphView topology={childTopology.data} nodeMetrics={{}} />
                       </div>
                     )}
@@ -685,17 +685,17 @@ export default function SpecInspector({
           </div>
         )}
         {tab === "source" && (
-          <pre className="text-xs leading-relaxed whitespace-pre-wrap rounded border border-slate-200 bg-slate-950 text-slate-50 p-3 overflow-x-auto">
+          <pre className="text-xs leading-relaxed whitespace-pre-wrap rounded border border-slate-700 bg-slate-950 text-slate-50 p-3 overflow-x-auto">
             {spec?.yaml ?? "Source YAML unavailable."}
           </pre>
         )}
         {tab === "validation" && (
           <div className="space-y-3 text-sm">
-            <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
+            <div className="rounded border border-emerald-700 bg-emerald-900/30 p-3 text-emerald-300">
               {spec ? "Validated by GraphSpec." : "Spec has not loaded."}
             </div>
             {spec?.spec.nodes.some((node) => node.kind === "subgraph") && (
-              <div className="rounded border border-violet-200 bg-violet-50 p-3 text-xs text-violet-950">
+              <div className="rounded border border-violet-700 bg-violet-900/20 p-3 text-xs text-violet-300">
                 Subgraph validation checks referenced workflow files and cycles. M5.2 still limits child workflows to acyclic, non-approval specs.
               </div>
             )}
@@ -710,17 +710,17 @@ export default function SpecInspector({
         )}
         {tab === "rollback" && (
           <div className="space-y-3 text-sm">
-            <div className="rounded border border-sky-200 bg-sky-50 p-3 text-sky-950">
+            <div className="rounded border border-sky-700 bg-sky-900/20 p-3 text-sky-300">
               Rollback restores are validated, human-confirmed, and create a new audit snapshot before writing the canonical YAML.
             </div>
             {rollbackSnapshots.isLoading && <div className="text-xs text-slate-500">Loading rollback snapshots...</div>}
             {rollbackSnapshots.error && (
-              <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+              <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                 Error loading rollback snapshots.
               </div>
             )}
             {rollbackSnapshots.data?.snapshots.length === 0 && (
-              <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              <div className="rounded border border-slate-700 bg-slate-800 p-3 text-xs text-slate-400">
                 No rollback snapshots found for this workflow.
               </div>
             )}
@@ -734,7 +734,7 @@ export default function SpecInspector({
                       type="button"
                       className={[
                         "w-full rounded border p-3 text-left text-xs",
-                        selected ? "border-sky-500 bg-white" : "border-sky-200 bg-sky-50",
+                        selected ? "border-sky-400 bg-slate-800" : "border-sky-700 bg-sky-900/20",
                       ].join(" ")}
                       onClick={() => selectRollbackSnapshot(snapshot.snapshot_id)}
                     >
@@ -742,7 +742,7 @@ export default function SpecInspector({
                         <div className="font-mono font-medium">{snapshot.snapshot_id}</div>
                         <div>{snapshot.created_at}</div>
                       </div>
-                      <div className="text-slate-700">{snapshot.proposal_summary || "No summary recorded."}</div>
+                      <div className="text-slate-300">{snapshot.proposal_summary || "No summary recorded."}</div>
                       <div className="font-mono text-[11px] text-slate-500">
                         by {snapshot.accepted_by} | {snapshot.rollback_path}
                       </div>
@@ -753,18 +753,18 @@ export default function SpecInspector({
             )}
             {isLoadingRollbackPreview && <div className="text-xs text-slate-500">Loading rollback preview...</div>}
             {rollbackPreviewError && (
-              <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+              <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                 {rollbackPreviewError}
               </div>
             )}
             {rollbackPreview && (
-              <div className="space-y-3 rounded border border-sky-200 bg-white p-3">
-                <div className="text-xs font-medium text-slate-800">Rollback preview</div>
+              <div className="space-y-3 rounded border border-sky-700 bg-slate-900 p-3">
+                <div className="text-xs font-medium text-slate-200">Rollback preview</div>
                 <Field label="Snapshot" value={rollbackPreview.snapshot_id} mono />
                 <Field label="Diff" value={rollbackPreview.diff || "No changes."} mono pre />
                 <Field label="Rollback YAML" value={rollbackPreview.rollback_yaml} mono pre />
-                <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
-                  <label className="flex items-start gap-2 text-xs text-slate-700">
+                <div className="space-y-2 rounded border border-slate-700 bg-slate-900 p-3">
+                  <label className="flex items-start gap-2 text-xs text-slate-300">
                     <input
                       className="mt-0.5"
                       type="checkbox"
@@ -775,7 +775,7 @@ export default function SpecInspector({
                   </label>
                   <button
                     type="button"
-                    className="rounded border border-sky-900 bg-sky-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                    className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:border-slate-700"
                     disabled={!rollbackConfirmed || isRestoringRollback}
                     onClick={submitRollbackRestore}
                   >
@@ -785,12 +785,12 @@ export default function SpecInspector({
               </div>
             )}
             {rollbackError && (
-              <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+              <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                 {rollbackError}
               </div>
             )}
             {rollbackResult && (
-              <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+              <div className="space-y-2 rounded border border-emerald-700 bg-emerald-900/30 p-3 text-xs text-emerald-300">
                 <div className="font-medium">Restored {rollbackResult.snapshot_id}</div>
                 <Field label="Source Path" value={rollbackResult.source_path} mono />
                 <Field label="Audit Path" value={rollbackResult.audit_path} mono />
@@ -801,13 +801,13 @@ export default function SpecInspector({
         )}
         {tab === "propose" && (
           <div className="space-y-3 text-sm">
-            <div className="rounded border border-amber-200 bg-amber-50 p-3 text-amber-900">
+            <div className="rounded border border-amber-700 bg-amber-900/30 p-3 text-amber-300">
               Proposals validate and diff YAML first. Applying a valid proposal writes the canonical workflow file and creates a rollback snapshot.
             </div>
             <div className="space-y-1">
               <label className="text-[11px] uppercase tracking-wide text-slate-500">Mutation Goal</label>
               <textarea
-                className="h-24 w-full resize-none rounded border border-slate-300 p-2 text-xs"
+                className="h-24 w-full resize-none rounded border border-slate-600 bg-slate-800 text-slate-100 p-2 text-xs"
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
                 placeholder="Reduce cost while preserving behavior."
@@ -816,31 +816,31 @@ export default function SpecInspector({
             <div className="space-y-1">
               <label className="text-[11px] uppercase tracking-wide text-slate-500">Constraints</label>
               <textarea
-                className="h-20 w-full resize-none rounded border border-slate-300 p-2 text-xs"
+                className="h-20 w-full resize-none rounded border border-slate-600 bg-slate-800 text-slate-100 p-2 text-xs"
                 value={constraints}
                 onChange={(event) => setConstraints(event.target.value)}
               />
             </div>
             <button
               type="button"
-              className="rounded border border-slate-300 bg-slate-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="rounded border border-slate-500 bg-slate-700 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
               disabled={!spec || !goal.trim() || isProposing}
               onClick={submitProposal}
             >
               {isProposing ? "Proposing..." : "Propose mutation"}
             </button>
             {proposalError && (
-              <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+              <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                 {proposalError}
               </div>
             )}
-            <div className="space-y-3 rounded border border-blue-200 bg-blue-50 p-3">
-              <div className="text-xs font-medium text-blue-950">Optimize candidates</div>
+            <div className="space-y-3 rounded border border-blue-700 bg-blue-900/20 p-3">
+              <div className="text-xs font-medium text-blue-200">Optimize candidates</div>
               <div className="grid grid-cols-3 gap-2">
                 <label className="space-y-1">
-                  <div className="text-[11px] uppercase tracking-wide text-blue-700">Candidates</div>
+                  <div className="text-[11px] uppercase tracking-wide text-blue-400">Candidates</div>
                   <input
-                    className="w-full rounded border border-blue-200 p-1.5 text-xs"
+                    className="w-full rounded border border-blue-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                     type="number"
                     min={2}
                     max={5}
@@ -849,9 +849,9 @@ export default function SpecInspector({
                   />
                 </label>
                 <label className="space-y-1">
-                  <div className="text-[11px] uppercase tracking-wide text-blue-700">Runs / Fixture</div>
+                  <div className="text-[11px] uppercase tracking-wide text-blue-400">Runs / Fixture</div>
                   <input
-                    className="w-full rounded border border-blue-200 p-1.5 text-xs"
+                    className="w-full rounded border border-blue-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                     type="number"
                     min={1}
                     max={8}
@@ -860,9 +860,9 @@ export default function SpecInspector({
                   />
                 </label>
                 <label className="space-y-1">
-                  <div className="text-[11px] uppercase tracking-wide text-blue-700">Cost Cap USD</div>
+                  <div className="text-[11px] uppercase tracking-wide text-blue-400">Cost Cap USD</div>
                   <input
-                    className="w-full rounded border border-blue-200 p-1.5 text-xs"
+                    className="w-full rounded border border-blue-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                     type="number"
                     min={0.01}
                     step={0.01}
@@ -873,14 +873,14 @@ export default function SpecInspector({
               </div>
               <button
                 type="button"
-                className="rounded border border-blue-900 bg-blue-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:border-slate-400"
+                className="rounded border border-blue-500 bg-blue-700 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:border-slate-700"
                 disabled={!spec || !goal.trim() || isOptimizing}
                 onClick={submitOptimization}
               >
                 {isOptimizing ? "Optimizing..." : "Optimize candidates"}
               </button>
               {optimizationError && (
-                <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                   {optimizationError}
                 </div>
               )}
@@ -890,8 +890,8 @@ export default function SpecInspector({
                     className={[
                       "rounded border p-3 text-xs",
                       optimization.status === "ok"
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                        : "border-amber-200 bg-amber-50 text-amber-900",
+                        ? "border-emerald-700 bg-emerald-900/30 text-emerald-300"
+                        : "border-amber-700 bg-amber-900/30 text-amber-300",
                     ].join(" ")}
                   >
                     <div className="font-medium">Optimization status: {optimization.status}</div>
@@ -911,7 +911,7 @@ export default function SpecInspector({
                           type="button"
                           className={[
                             "text-left rounded border p-3 text-xs",
-                            selected ? "border-blue-500 bg-white" : "border-blue-200 bg-blue-50",
+                            selected ? "border-blue-400 bg-slate-800" : "border-blue-700 bg-blue-900/20",
                           ].join(" ")}
                           onClick={() => setSelectedCandidateId(candidate.candidate_id)}
                         >
@@ -922,8 +922,8 @@ export default function SpecInspector({
                             </div>
                             <div>{candidate.status}</div>
                           </div>
-                          <div className="text-slate-700">{candidate.summary}</div>
-                          <div className="font-mono text-[11px] text-slate-600">
+                          <div className="text-slate-300">{candidate.summary}</div>
+                          <div className="font-mono text-[11px] text-slate-400">
                             rank {candidate.rank ?? "-"} | pass{" "}
                             {typeof overall.pass_rate === "number" ? `${(overall.pass_rate * 100).toFixed(1)}%` : "-"} | cost{" "}
                             {typeof overall.mean_cost_usd === "number" ? `$${overall.mean_cost_usd.toFixed(4)}` : "-"} | latency{" "}
@@ -934,8 +934,8 @@ export default function SpecInspector({
                     })}
                   </div>
                   {selectedCandidate && (
-                    <div className="space-y-3 rounded border border-blue-200 bg-white p-3">
-                      <div className="text-xs font-medium text-slate-800">Selected candidate</div>
+                    <div className="space-y-3 rounded border border-blue-700 bg-slate-900 p-3">
+                      <div className="text-xs font-medium text-slate-200">Selected candidate</div>
                       {selectedCandidate.validation_errors.length > 0 && (
                         <Field label="Validation Errors" value={selectedCandidate.validation_errors} mono pre />
                       )}
@@ -943,8 +943,8 @@ export default function SpecInspector({
                       <Field label="Diff" value={selectedCandidate.diff || "No changes proposed."} mono pre />
                       <Field label="Proposed YAML" value={selectedCandidate.proposed_yaml} mono pre />
                       {selectedCandidate.status === "valid" && (
-                        <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
-                          <label className="flex items-start gap-2 text-xs text-slate-700">
+                        <div className="space-y-2 rounded border border-slate-700 bg-slate-900 p-3">
+                          <label className="flex items-start gap-2 text-xs text-slate-300">
                             <input
                               className="mt-0.5"
                               type="checkbox"
@@ -955,7 +955,7 @@ export default function SpecInspector({
                           </label>
                           <button
                             type="button"
-                            className="rounded border border-slate-300 bg-slate-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                            className="rounded border border-slate-500 bg-slate-700 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
                             disabled={!applyConfirmed || isApplying}
                             onClick={() => submitApply(selectedCandidate)}
                           >
@@ -974,8 +974,8 @@ export default function SpecInspector({
                   className={[
                     "rounded border p-3 text-xs",
                     proposal.status === "valid"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                      : "border-red-200 bg-red-50 text-red-900",
+                      ? "border-emerald-700 bg-emerald-900/30 text-emerald-300"
+                      : "border-red-700 bg-red-900/30 text-red-300",
                   ].join(" ")}
                 >
                   <div className="font-medium">Status: {proposal.status}</div>
@@ -986,13 +986,13 @@ export default function SpecInspector({
                 )}
                 {proposal.status === "valid" && (
                   <>
-                    <div className="space-y-3 rounded border border-slate-200 bg-slate-50 p-3">
-                      <div className="text-xs font-medium text-slate-800">Evaluate proposal</div>
+                    <div className="space-y-3 rounded border border-slate-700 bg-slate-900 p-3">
+                      <div className="text-xs font-medium text-slate-200">Evaluate proposal</div>
                       <div className="grid grid-cols-2 gap-2">
                         <label className="space-y-1">
                           <div className="text-[11px] uppercase tracking-wide text-slate-500">Runs / Fixture</div>
                           <input
-                            className="w-full rounded border border-slate-300 p-1.5 text-xs"
+                            className="w-full rounded border border-slate-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                             type="number"
                             min={1}
                             max={8}
@@ -1003,7 +1003,7 @@ export default function SpecInspector({
                         <label className="space-y-1">
                           <div className="text-[11px] uppercase tracking-wide text-slate-500">Cost Cap USD</div>
                           <input
-                            className="w-full rounded border border-slate-300 p-1.5 text-xs"
+                            className="w-full rounded border border-slate-600 bg-slate-800 text-slate-100 p-1.5 text-xs"
                             type="number"
                             min={0.01}
                             step={0.01}
@@ -1014,14 +1014,14 @@ export default function SpecInspector({
                       </div>
                       <button
                         type="button"
-                        className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                        className="rounded border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
                         disabled={isEvaluating}
                         onClick={submitEvaluation}
                       >
                         {isEvaluating ? "Evaluating..." : "Evaluate proposal"}
                       </button>
                       {evaluationError && (
-                        <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                        <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                           {evaluationError}
                         </div>
                       )}
@@ -1031,8 +1031,8 @@ export default function SpecInspector({
                             className={[
                               "rounded border p-3 text-xs",
                               evaluation.status === "ok"
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                                : "border-amber-200 bg-amber-50 text-amber-900",
+                                ? "border-emerald-700 bg-emerald-900/30 text-emerald-300"
+                                : "border-amber-700 bg-amber-900/30 text-amber-300",
                             ].join(" ")}
                           >
                             <div className="font-medium">Eval status: {evaluation.status}</div>
@@ -1053,16 +1053,16 @@ export default function SpecInspector({
                         </div>
                       )}
                     </div>
-                    <div className="space-y-3 rounded border border-slate-200 bg-white p-3">
-                      <div className="text-xs font-medium text-slate-800">Apply proposal</div>
+                    <div className="space-y-3 rounded border border-slate-700 bg-slate-900 p-3">
+                      <div className="text-xs font-medium text-slate-200">Apply proposal</div>
                       {evaluation?.eval && (
-                        <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+                        <div className="rounded border border-slate-700 bg-slate-800 p-2 text-xs text-slate-300">
                           Eval evidence: {evaluation.eval.completed_run_count} runs,{" "}
                           {(evaluation.eval.overall.pass_rate * 100).toFixed(1)}% pass rate, $
                           {evaluation.eval.overall.mean_cost_usd.toFixed(4)} mean cost.
                         </div>
                       )}
-                      <label className="flex items-start gap-2 text-xs text-slate-700">
+                      <label className="flex items-start gap-2 text-xs text-slate-300">
                         <input
                           className="mt-0.5"
                           type="checkbox"
@@ -1073,19 +1073,19 @@ export default function SpecInspector({
                       </label>
                       <button
                         type="button"
-                        className="rounded border border-slate-300 bg-slate-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                        className="rounded border border-slate-500 bg-slate-700 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
                         disabled={!applyConfirmed || isApplying}
                         onClick={() => submitApply()}
                       >
                         {isApplying ? "Applying..." : "Apply proposal"}
                       </button>
                       {applyError && (
-                        <div className="whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                        <div className="whitespace-pre-wrap rounded border border-red-700 bg-red-900/30 p-3 text-xs text-red-400">
                           {applyError}
                         </div>
                       )}
                       {applyResult && (
-                        <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                        <div className="space-y-2 rounded border border-emerald-700 bg-emerald-900/30 p-3 text-xs text-emerald-300">
                           <div className="font-medium">Applied to {applyResult.source_path}</div>
                           <Field label="Audit Path" value={applyResult.audit_path} mono />
                           <Field label="Rollback Snapshot" value={applyResult.rollback_path} mono />

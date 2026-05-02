@@ -131,14 +131,18 @@ def test_happy_path_passes_gate(monkeypatch, tmp_runs_root):
     assert result.status == "ok"
     assert result.final_state.get("tester_verdict") is True
     assert result.final_state.get("tester_mode") == "llm_judge"
-    assert re.match(r"^run_\d{8}T\d{6}Z_ct_test_[0-9a-f]{8}$", result.run_id)
+    assert re.match(r"^run_\d{4}_\d{2}_\d{2}_\d{2}h\d{2}m\d{2}s_AEST_ct_test_[0-9a-f]{8}$", result.run_id)
     assert result.run_dir == resolve_run_dir(tmp_runs_root, result.run_id)
-    assert result.run_dir.parent.name == result.run_id[:12].removeprefix("run_")
+    assert result.run_dir.parent.name == result.run_id.removeprefix("run_")[:10].replace("_", "")
     manifest = json.loads((result.run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["workflow"] == "ct_test"
     assert manifest["run_id"] == result.run_id
     assert manifest["status"] == "ok"
+    assert manifest["timezone"] == "AEST"
+    assert manifest["utc_offset"] == "+10:00"
     assert manifest["artifacts"]["telemetry_db"].endswith("/telemetry.db")
+    assert (result.run_dir / "audit.json").exists()
+    assert (result.run_dir / "node_events.jsonl").exists()
 
 
 def test_loop_then_pass(monkeypatch, tmp_runs_root):

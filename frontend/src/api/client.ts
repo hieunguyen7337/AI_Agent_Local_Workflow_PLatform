@@ -20,6 +20,8 @@ import type {
   StartRunRequest,
   StartRunResponse,
   RunDetailResponse,
+  DatasetEvalDetail,
+  DatasetEvalSummary,
   RunSummary,
   Topology,
   WorkflowSpecResponse,
@@ -220,5 +222,17 @@ export async function fetchRun(runId: string): Promise<RunDetailResponse> {
 export async function fetchNodeMetrics(workflow: string, limit = 50): Promise<NodeMetricsResponse> {
   const r = await fetch(`${BASE}/api/graph/${workflow}/node-metrics?limit=${limit}`);
   if (!r.ok) throw new Error(`node metrics fetch ${r.status}`);
+  return r.json();
+}
+
+export async function fetchDatasetEvals(): Promise<DatasetEvalSummary[]> {
+  const r = await fetch(`${BASE}/api/evals`);
+  if (!r.ok) throw new Error(`evals fetch ${r.status}`);
+  return r.json();
+}
+
+export async function fetchDatasetEval(workflow: string, evalId: string): Promise<DatasetEvalDetail> {
+  const r = await fetch(`${BASE}/api/evals/${encodeURIComponent(workflow)}/${encodeURIComponent(evalId)}`);
+  if (!r.ok) throw new Error(`eval detail fetch ${r.status}`);
   return r.json();
 }

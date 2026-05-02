@@ -11,6 +11,7 @@ from typing import Any
 from opentelemetry.trace import Status, StatusCode
 
 from backend.builder.nodes import VectorRetrieverNodeConfig
+from backend.runtime.audit import AuditRecorder, audit_preview
 from backend.runtime.state import WorkflowState
 from backend.telemetry.genai_attrs import WORKFLOW_LATENCY_MS, WORKFLOW_STATUS, node_attrs
 from backend.telemetry.tracer import get_tracer
@@ -21,6 +22,7 @@ def make_vector_retriever_node(
     *,
     run_id: str,
     graph_name: str,
+    audit: AuditRecorder | None = None,
 ):
     tracer = get_tracer()
 
@@ -52,9 +54,27 @@ def make_vector_retriever_node(
                 result = {cfg.output_state_key: output}
                 if cfg.id_output_state_key:
                     result[cfg.id_output_state_key] = ids
+                if audit is not None:
+                    audit.write_event(
+                        {
+                            "node_id": cfg.id,
+                            "node_kind": "vector_retriever",
+                            "status": "ok",
+                            "index_path": _format_template(cfg.index_path, state),
+                            "query_embedding_state_key": cfg.query_embedding_state_key,
+                            "query_embedding_dimensions": len(query_embedding),
+                            "top_k": cfg.top_k,
+                            "output_state_key": cfg.output_state_key,
+                            "output": audit_preview(output),
+                            "ids": ids,
+                            "latency_ms": latency_ms,
+                        }
+                    )
                 return result
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
+                if audit is not None:
+                    audit.write_event({"node_id": cfg.id, "node_kind": "vector_retriever", "status": "error", "error": f"{type(e).__name__}: {e}"})
                 raise
 
     _node.__name__ = f"vector_retriever_{cfg.id}"

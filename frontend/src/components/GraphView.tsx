@@ -41,9 +41,10 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
         width: NODE_W,
         height: NODE_H,
         borderRadius: 8,
-        border: "1px solid #cbd5e1",
+        border: "1px solid #475569",
         padding: 10,
-        background: "white",
+        background: "#1e293b",
+        color: "#f1f5f9",
         fontSize: 13,
       },
       ...extra,
@@ -55,9 +56,10 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
       width: NODE_W,
       height: NODE_H,
       borderRadius: 40,
-      background: "#dcfce7",
+      background: "#14532d",
       padding: 10,
-      border: "1px solid #86efac",
+      border: "1px solid #16a34a",
+      color: "#f1f5f9",
     },
   });
   pushNode("__end__", "END", "exit", {
@@ -65,9 +67,10 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
       width: NODE_W,
       height: NODE_H,
       borderRadius: 40,
-      background: "#fee2e2",
+      background: "#7f1d1d",
       padding: 10,
-      border: "1px solid #fca5a5",
+      border: "1px solid #dc2626",
+      color: "#f1f5f9",
     },
   });
   topology.nodes.forEach((n) => {
@@ -79,9 +82,10 @@ function layout(topology: Topology): { nodes: Node<BaseNodeData>[]; edges: Edge[
         width: NODE_W,
         height: NODE_H,
         borderRadius: 8,
-        border: "1px solid #5eead4",
+        border: "1px solid #0ea5e9",
         padding: 10,
-        background: "#f0fdfa",
+        background: "#0c4a6e",
+        color: "#f1f5f9",
         fontSize: 13,
       };
     }
@@ -184,9 +188,9 @@ function renderLabel(name: string, kind: string, metric?: NodeMetric, metadata?:
   return (
     <div className="space-y-1" title={metadata ? JSON.stringify(metadata, null, 2) : undefined}>
       <div className="font-semibold leading-tight">{name}</div>
-      <div className="text-xs text-gray-500">{kind}</div>
+      <div className="text-xs text-slate-400">{kind}</div>
       {lines.length > 0 && (
-        <div className="text-[10px] leading-tight text-slate-600 font-mono truncate">
+        <div className="text-[10px] leading-tight text-slate-400 font-mono truncate">
           {lines.map((line) => (
             <div key={line} className="truncate">{line}</div>
           ))}
@@ -204,9 +208,9 @@ function renderLabel(name: string, kind: string, metric?: NodeMetric, metadata?:
 
 function Badge({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5">
-      <div className="text-[10px] text-slate-500 leading-none">{label}</div>
-      <div className="text-[11px] font-medium text-slate-700 leading-tight">{value}</div>
+    <div className="rounded border border-slate-600 bg-slate-700 px-1.5 py-0.5">
+      <div className="text-[10px] text-slate-400 leading-none">{label}</div>
+      <div className="text-[11px] font-medium text-slate-300 leading-tight">{value}</div>
     </div>
   );
 }
@@ -240,16 +244,24 @@ export default function GraphView({
   );
 
   return (
-    <div style={{ width: "100%", height: "100%" }}>
+    <div style={{ width: "100%", height: "100%", background: "#020617" }}>
       <ReactFlow
         nodes={decoratedNodes}
         edges={base.edges}
         fitView
+        fitViewOptions={{ padding: 0.15 }}
+        nodesDraggable={false}
+        panOnDrag
+        zoomOnScroll
         onNodeClick={(_event, node) => onSelectNode?.(node.id)}
       >
-        <MiniMap />
+        <MiniMap
+          style={{ background: "#0f172a" }}
+          nodeColor="#475569"
+          maskColor="rgba(2,6,23,0.8)"
+        />
         <Controls />
-        <Background />
+        <Background color="#334155" gap={16} />
       </ReactFlow>
     </div>
   );

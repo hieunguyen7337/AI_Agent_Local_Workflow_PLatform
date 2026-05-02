@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_ns DESC);
 """
 
+_DB_WRITE_LOCK = threading.Lock()
+
 
 def ensure_schema(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -195,11 +197,13 @@ def _jsonable(obj):
 
 
 def record_run_start(db_path: Path, *, run_id: str, graph_name: str, started_ns: int) -> None:
-    with sqlite3.connect(db_path) as con:
-        con.execute(
-            "INSERT OR REPLACE INTO runs (run_id, graph_name, started_ns, status) VALUES (?, ?, ?, ?)",
-            (run_id, graph_name, started_ns, "running"),
-        )
+    with _DB_WRITE_LOCK:
+        ensure_schema(db_path)
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                "INSERT OR REPLACE INTO runs (run_id, graph_name, started_ns, status) VALUES (?, ?, ?, ?)",
+                (run_id, graph_name, started_ns, "running"),
+            )
 
 
 def record_run_end(
@@ -212,8 +216,10 @@ def record_run_end(
     latency_ms: float,
     error: str | None = None,
 ) -> None:
-    with sqlite3.connect(db_path) as con:
-        con.execute(
-            "UPDATE runs SET ended_ns=?, status=?, cost_usd=?, latency_ms=?, error=? WHERE run_id=?",
-            (ended_ns, status, cost_usd, latency_ms, error, run_id),
-        )
+    with _DB_WRITE_LOCK:
+        ensure_schema(db_path)
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                "UPDATE runs SET ended_ns=?, status=?, cost_usd=?, latency_ms=?, error=? WHERE run_id=?",
+                (ended_ns, status, cost_usd, latency_ms, error, run_id),
+            )

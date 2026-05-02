@@ -73,8 +73,10 @@ def test_dataset_eval_maps_rows_to_full_state_and_writes_artifact(monkeypatch, t
     )
     captured_states: list[dict] = []
     captured_concurrency: dict[str, int] = {}
+    captured_batch_kwargs: dict[str, object] = {}
 
     def _fake_batch(workflow, items, **kwargs):
+        captured_batch_kwargs.update(kwargs)
         captured_concurrency["value"] = kwargs["max_concurrency"]
         captured_states.extend([dict(item.input_state) for item in items])
         return [
@@ -106,6 +108,16 @@ def test_dataset_eval_maps_rows_to_full_state_and_writes_artifact(monkeypatch, t
     assert output_path.exists()
     written = json.loads(output_path.read_text(encoding="utf-8"))
     assert written["results"][0]["scorers"][0]["pass"] is True
+    assert output_path.name == "eval_summary.json"
+    assert output_path.parent.parent.name == "demo"
+    assert "_AEST_demo_2rows" in output_path.parent.name
+    assert captured_batch_kwargs["shared_run_dir"] == output_path.parent
+    assert captured_batch_kwargs["use_checkpointer"] is False
+    assert captured_batch_kwargs["write_audit_summary"] is False
+    assert (output_path.parent / "rows.jsonl").exists()
+    assert (output_path.parent / "failed_rows.jsonl").exists()
+    assert (output_path.parent / "manifest.json").exists()
+    assert not list(output_path.parent.glob("**/checkpoints.db"))
 
 
 def test_dataset_eval_builtin_scorers(monkeypatch, tmp_path: Path):
@@ -181,7 +193,6 @@ def _reid_attrs(**overrides: str) -> dict[str, str]:
     attrs = {
         "gender": "male",
         "hair": "short",
-        "age": "adult",
         "clothing_type": "pants",
         "upper_body_clothes": "short sleeve",
         "lower_body_clothes": "long",
@@ -189,8 +200,6 @@ def _reid_attrs(**overrides: str) -> dict[str, str]:
         "backpack": "yes",
         "bag": "no",
         "handbag": "no",
-        "upper_body_clothes_color": "red",
-        "lower_body_clothes_color": "blue",
     }
     attrs.update(overrides)
     return attrs
@@ -464,8 +473,7 @@ def test_market1501_gallery_db_builder_stores_attributes_and_skips_invalid(tmp_p
     (gallery_dir / "-1_c1s1_000401_03.jpg").write_bytes(b"junk")
 
     def _extractor(path: Path) -> dict[str, str]:
-        color = "red" if path.name.startswith("0001") else "blue"
-        return _reid_attrs(upper_body_clothes_color=color)
+        return _reid_attrs(gender="male" if path.name.startswith("0001") else "female")
 
     db_path = build_gallery_db(
         market1501_root=market_root,
@@ -477,14 +485,14 @@ def test_market1501_gallery_db_builder_stores_attributes_and_skips_invalid(tmp_p
     with sqlite3.connect(db_path) as con:
         rows = con.execute(
             """
-            SELECT gallery_id, pid, camid, upper_body_clothes_color, gender, clothing_type, age
+            SELECT gallery_id, pid, camid, gender, clothing_type, hair
             FROM gallery_attributes
             ORDER BY gallery_id
             """
         ).fetchall()
     assert rows == [
-        ("0001_c2s1_000001_00.jpg", 1, 2, "red", "male", "pants", "adult"),
-        ("0002_c1s1_000002_00.jpg", 2, 1, "blue", "male", "pants", "adult"),
+        ("0001_c2s1_000001_00.jpg", 1, 2, "male", "pants", "short"),
+        ("0002_c1s1_000002_00.jpg", 2, 1, "female", "pants", "short"),
     ]
 
 
@@ -532,11 +540,11 @@ def test_attribute_dbs_builder_builds_query_and_gallery_dbs(tmp_path: Path):
     assert outputs["query"].name == "query_attributes.sqlite"
     assert outputs["gallery"].name == "gallery_attributes.sqlite"
     with sqlite3.connect(outputs["query"]) as con:
-        query_rows = con.execute("SELECT image_id, upper_body_clothes_color FROM image_attributes").fetchall()
+        query_rows = con.execute("SELECT image_id, gender FROM image_attributes").fetchall()
     with sqlite3.connect(outputs["gallery"]) as con:
-        gallery_rows = con.execute("SELECT image_id, upper_body_clothes_color FROM image_attributes").fetchall()
-    assert query_rows == [("0001_c1s1_000001_00.jpg", "red")]
-    assert gallery_rows == [("0001_c2s1_000001_00.jpg", "red")]
+        gallery_rows = con.execute("SELECT image_id, gender FROM image_attributes").fetchall()
+    assert query_rows == [("0001_c1s1_000001_00.jpg", "male")]
+    assert gallery_rows == [("0001_c2s1_000001_00.jpg", "male")]
 
 
 def test_embedding_dbs_builder_builds_query_and_gallery_dbs(tmp_path: Path):
