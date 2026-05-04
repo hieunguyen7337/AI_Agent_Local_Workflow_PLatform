@@ -193,9 +193,10 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
 function renderLabel(name: string, kind: string, metric?: NodeMetric, metadata?: Record<string, unknown>) {
   if (kind === "entry" || kind === "exit") {
     return (
-      <div className="flex h-full min-h-0 flex-col items-center justify-center overflow-hidden text-center">
-        <div className="truncate text-base font-semibold leading-tight" title={name}>{name}</div>
-        <div className="mt-2 truncate text-xs leading-tight text-slate-300">{kind}</div>
+      <div className="flex h-full min-h-0 flex-col items-center justify-center overflow-hidden px-2 text-center">
+        <div className="text-2xl font-semibold leading-tight tracking-wide" title={name}>
+          {name}
+        </div>
       </div>
     );
   }

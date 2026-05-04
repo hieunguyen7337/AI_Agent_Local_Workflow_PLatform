@@ -22,3 +22,5 @@ evals/person_reid_market1501/attribute_db/
 evals/person_reid_market1501/embedding_db/
 evals/person_reid_market1501/partition_100q_500g/
 dataset/
+ss_R0_R5_workflow/
+.codex_logs/
