@@ -45,7 +45,22 @@ export type NodeKind =
   | "router"
   | "approval"
   | "subgraph"
-  | "python_tool";
+  | "python_tool"
+  | "agent_context"
+  | "agent_startup"
+  | "agent_model"
+  | "agent_response_parser"
+  | "permission_gate"
+  | "hook_runner"
+  | "tool_executor"
+  | "context_compactor"
+  | "memory_writer"
+  | "subagent_orchestrator"
+  | "subagent_plan"
+  | "subagent_context"
+  | "subagent_spawn"
+  | "subagent_join"
+  | "subagent_summarize";
 
 export interface GraphNode {
   id: string;

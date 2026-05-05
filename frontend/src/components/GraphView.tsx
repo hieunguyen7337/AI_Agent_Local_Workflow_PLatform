@@ -187,6 +187,101 @@ function metadataLines(kind: string, metadata?: Record<string, unknown>): string
       metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
     ].filter(Boolean);
   }
+  if (kind === "agent_context") {
+    return [
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+      metadata.include_files ? `files: ${(metadata.include_files as unknown[]).length}` : "",
+      metadata.memory_sources ? `memory: ${(metadata.memory_sources as unknown[]).length}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "agent_startup") {
+    return [
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+      metadata.provider_env_vars ? `env: ${(metadata.provider_env_vars as unknown[]).length}` : "",
+      metadata.mcp_registry ? "mcp registry" : "",
+    ].filter(Boolean);
+  }
+  if (kind === "agent_model") {
+    return [
+      [metadata.provider, metadata.model].filter(Boolean).join(" / "),
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "agent_response_parser") {
+    return [
+      metadata.route_state_key ? `route: ${String(metadata.route_state_key)}` : "",
+      metadata.tool_request_state_key ? `tool: ${String(metadata.tool_request_state_key)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "permission_gate") {
+    return [
+      metadata.mode ? `mode: ${String(metadata.mode)}` : "",
+      metadata.route_state_key ? `route: ${String(metadata.route_state_key)}` : "",
+      metadata.policy_stack ? `policies: ${(metadata.policy_stack as unknown[]).length}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "hook_runner") {
+    return [
+      metadata.trigger ? `trigger: ${String(metadata.trigger)}` : "",
+      metadata.hooks ? `hooks: ${(metadata.hooks as unknown[]).length}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "tool_executor") {
+    return [
+      metadata.tools ? `tools: ${(metadata.tools as unknown[]).length}` : metadata.allowed_tools ? `tools: ${(metadata.allowed_tools as unknown[]).join(", ")}` : "",
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "context_compactor") {
+    return [
+      metadata.preserve_last_n ? `keep: ${String(metadata.preserve_last_n)}` : "",
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "subagent_orchestrator") {
+    return [
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+      metadata.topology ? `topology: ${String(metadata.topology)}` : "v1 stub",
+    ].filter(Boolean);
+  }
+  if (kind === "subagent_plan") {
+    return [
+      metadata.output_tasks_state_key ? `tasks: ${String(metadata.output_tasks_state_key)}` : "",
+      metadata.tool_request_state_key ? `req: ${String(metadata.tool_request_state_key)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "subagent_context") {
+    return [
+      metadata.output_child_inputs_state_key ? `out: ${String(metadata.output_child_inputs_state_key)}` : "",
+      metadata.max_context_chars != null ? `max: ${String(metadata.max_context_chars)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "subagent_spawn") {
+    return [
+      metadata.child_workflow ? `child: ${String(metadata.child_workflow)}` : "",
+      metadata.execute_children === false ? "execute: off" : "execute: on",
+      metadata.lineage_dirname ? `dir: ${String(metadata.lineage_dirname)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "subagent_join") {
+    return [
+      metadata.child_runs_state_key ? `runs: ${String(metadata.child_runs_state_key)}` : "",
+      metadata.output_joined_state_key ? `out: ${String(metadata.output_joined_state_key)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "subagent_summarize") {
+    return [
+      metadata.joined_state_key ? `in: ${String(metadata.joined_state_key)}` : "",
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+      metadata.max_summary_chars != null ? `max: ${String(metadata.max_summary_chars)}` : "",
+    ].filter(Boolean);
+  }
+  if (kind === "memory_writer") {
+    return [
+      metadata.write_mode ? `mode: ${String(metadata.write_mode)}` : "",
+      metadata.output_state_key ? `out: ${String(metadata.output_state_key)}` : "",
+    ].filter(Boolean);
+  }
   return [];
 }
 
