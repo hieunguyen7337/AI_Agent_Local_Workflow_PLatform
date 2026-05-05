@@ -1,0 +1,443 @@
+schema_version: workflow.graph/v1
+name: claude_code_yaml_workflow
+description: Visible Claude Code-style YAML workflow with explicit planning, tool routing, permissions, hooks, compaction, and ReAct loop control.
+category: coding
+tags:
+  - agentic-loop
+  - code-generation
+  - permission-gating
+  - context-compaction
+  - yaml-workflow
+budget:
+  cost_usd: 1.00
+  latency_ms: 600000
+entry: startup
+nodes:
+  - id: startup
+    kind: agent_startup
+    description: Run local startup checks and assemble runtime config before context loading.
+    output_state_key: runtime_config
+    provider_env_vars:
+      - OPENROUTER_API_KEY
+      - OPENAI_API_KEY
+    policy_config_path: .claude/agent_policy.json
+    mcp_registry:
+      transports:
+        - stdio
+        - sse
+        - http
+        - websocket
+      capability_registration: runtime
+      context_cost: token_free
+      health_check: on_startup
+      servers: []
+
+  - id: context_loader
+    kind: agent_context
+    description: Assemble local project instructions and current user task into agent context.
+    runtime_config_state_key: runtime_config
+    memory_sources:
+      - tier: session
+        store: appstate
+        scope: current_loop
+        persists: false
+        auto_written: false
+      - tier: project
+        store: CLAUDE.md
+        scope: project_root
+        persists: true
+        auto_written: false
+      - tier: global
+        store: ~/.claude/memory
+        scope: all_projects
+        persists: true
+        auto_written: true
+        writes_on: session_end
+    include_files:
+      - AGENTS.md
+      - CLAUDE.md
+      - FUTURE_SCOPE.md
+    output_state_key: assembled_context
+    max_file_chars: 5000
+
+  - id: planner
+    kind: llm
+    provider: openrouter
+    model: x-ai/grok-4.3
+    system_prompt: >-
+      You are a senior software engineer operating in plan mode. Produce a concise,
+      concrete implementation plan for the user's request.
+
+      The plan must list explicit deliverable file paths (for example src/..., tests/...) and end
+      with a verification step (for example run tests). Never return an empty plan.
+
+      Rules: output plain prose only (Markdown numbered steps like 1. 2. 3.). Do not emit JSON,
+      YAML, pseudo-tool syntax, role-play tags, or lines such as [TOOL_CALL], function_call,
+      or XML tool tags. Do not call tools or pretend to call tools. No fenced code blocks unless
+      the user explicitly asked for code in their task.
+    user_prompt_template: |-
+      Task:
+      {user_input}
+
+      Local context:
+      {assembled_context}
+
+      Respond with a short numbered Markdown plan only (human review). No tools, no JSON.
+      Include concrete file paths to create or modify and a final verify step. Do not return an empty plan.
+    output_state_key: task_plan
+    temperature: 0.2
+
+  - id: plan_normalize
+    kind: llm
+    provider: openrouter
+    model: x-ai/grok-4.3
+    description: Rewrite the draft plan into clean numbered Markdown for human approval.
+    system_prompt: >-
+      You normalize draft implementation plans into explicit human-reviewable Markdown only.
+      The plan must list explicit deliverable file paths and end with a verification step.
+      Never output an empty plan; if the draft is empty, infer minimal file paths from the task.
+      Output numbered steps (1. 2. 3.). No JSON, no pseudo-tool syntax, no [TOOL_CALL] or
+      function_call lines, no XML tool tags. Preserve the technical intent of the draft; do not
+      invent major new work beyond the draft. Prefer prose over code fences.
+    user_prompt_template: |-
+      Rewrite the following draft plan into clean Markdown numbered steps only.
+
+      Draft plan:
+      {task_plan}
+
+      The normalized plan must include concrete file paths and a final verify step. Do not return an empty plan.
+    output_state_key: task_plan
+    temperature: 0.0
+
+  - id: plan_approval
+    kind: approval
+    description: Human approval gate before the agent loop can execute tools.
+    prompt: Review and approve the generated task plan before the coding-agent loop starts.
+    approval_state_key: plan_approval_decision
+    approved_target: agent_model
+    rejected_target: planner
+
+  - id: agent_model
+    kind: agent_model
+    provider: openrouter
+    model: x-ai/grok-4.3
+    system_prompt: |-
+      You are a local coding agent operating through a visible YAML workflow graph.
+      Choose exactly one action per turn.
+
+      Respond with strict JSON in one of these forms:
+      {{"final_answer": "concise final answer for the user"}}
+      {{"tool_request": {{"name": "read_file", "args": {{"path": "relative/path"}}}}}}
+      {{"tool_request": {{"name": "glob", "args": {{"pattern": "**/*.py"}}}}}}
+      {{"tool_request": {{"name": "search", "args": {{"pattern": "text", "path": ".", "include": "*.py"}}}}}}
+      {{"tool_request": {{"name": "write_file", "args": {{"path": "relative/path", "content": "complete file content"}}}}}}
+      {{"tool_request": {{"name": "shell", "args": {{"command": "command to run"}}}}}}
+      {{"tool_request": {{"name": "mcp_call", "args": {{"server": "name", "tool": "tool_name", "arguments": {{}}}}}}}}
+      {{"tool_request": {{"name": "subagent", "args": {{"prompt": "delegated task for an isolated child agent", "tasks": []}}}}}}
+
+      Reconnaissance: use read_file, glob, or search only as needed. Prefer minimal reads; do not
+      read_file the same path again unless the file changed or you are fixing an error. The
+      assembled context often already includes key project files.
+
+      Implementation: after enough context, use write_file to create or update files per the
+      approved plan; use shell for tests or checks when appropriate. Keep writes inside the current workspace.
+
+      Paths for read_file, search, write_file, and glob targets must be relative to the workspace
+      root (use forward slashes). Never use Windows drive letters or absolute paths outside the
+      workspace; the runtime may reject them.
+    user_prompt_template: |-
+      Task:
+      {user_input}
+
+      Approved plan:
+      {task_plan}
+
+      Assembled context:
+      {assembled_context}
+
+      Compacted context:
+      {compacted_context}
+
+      Prior tool digest (bounded summaries only; full outputs are not repeated here):
+      {tool_result_digest}
+
+      Prior permission decision:
+      {permission_decision}
+
+      Subagent results:
+      {subagent_results}
+    output_state_key: agent_model_response
+    temperature: 0.2
+
+  - id: agent_response_parser
+    kind: agent_response_parser
+    description: Parse strict JSON from the model into either a final answer or one tool request.
+    input_state_key: agent_model_response
+    route_state_key: agent_route
+    tool_request_state_key: tool_request
+    final_answer_state_key: final_answer
+    should_stop_state_key: agent_should_stop
+
+  - id: tool_route
+    kind: router
+    description: Route final responses to loop termination and tool requests to permission evaluation.
+    route_state_key: agent_route
+    routes:
+      FINAL: loop_gate
+      TOOL: permission_gate
+    default_target: loop_gate
+
+  - id: permission_gate
+    kind: permission_gate
+    description: Deny-first policy over local coding-agent tools.
+    mode: default
+    ml_classifier: false
+    policy_stack:
+      - source: mdm_policy
+        precedence: 100
+      - source: CLAUDE.md
+        precedence: 80
+      - source: settings_json
+        precedence: 60
+      - source: runtime_default
+        precedence: 0
+    escalate_on:
+      - irreversible_fs_write
+      - network_egress
+      - shell_with_sudo
+    never_restore_on_resume: true
+    tool_request_state_key: tool_request
+    route_state_key: permission_route
+    decision_state_key: permission_decision
+    history_state_key: tool_result_history
+    write_scope: cwd_only
+
+  - id: permission_route
+    kind: router
+    description: Route approved, ask, and denied permission decisions.
+    route_state_key: permission_route
+    routes:
+      APPROVED: pre_tool_hooks
+      ASK: tool_approval
+      DENIED: loop_gate
+    default_target: loop_gate
+
+  - id: tool_approval
+    kind: approval
+    description: Human approval gate for write and shell tool requests.
+    prompt: Review and approve the requested local tool action.
+    approval_state_key: tool_approval_decision
+    approved_target: pre_tool_hooks
+    rejected_target: loop_gate
+
+  - id: pre_tool_hooks
+    kind: hook_runner
+    description: Run configured blocking pre-tool hooks. Empty by default.
+    trigger: pre_tool
+    hooks: []
+    tool_request_state_key: tool_request
+    output_state_key: hook_pre_result
+
+  - id: tool_executor
+    kind: tool_executor
+    description: Execute one allowlisted local tool and write audit artifacts.
+    tool_request_state_key: tool_request
+    output_state_key: tool_result
+    history_state_key: tool_result_history
+    runtime_config_state_key: runtime_config
+    tools:
+      - id: read_file
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: true
+        permission_required: false
+      - id: glob
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: true
+        permission_required: false
+      - id: search
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: true
+        permission_required: false
+      - id: write_file
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: false
+        permission_required: true
+        checkpoint_before_write: true
+      - id: shell
+        bucket: shell_tools
+        reversible: false
+        is_concurrency_safe: false
+        permission_required: true
+        windows_fallback: powershell
+      - id: subagent
+        bucket: agent_tools
+        reversible: depends
+        is_concurrency_safe: true
+        permission_required: false
+      - id: mcp_call
+        bucket: mcp_tools
+        reversible: depends_on_server
+        is_concurrency_safe: true
+        permission_required: true
+    cwd_only: true
+    context_pressure_state_key: context_pressure_exceeded
+    compaction_threshold_chars: 12000
+
+  - id: post_tool_hooks
+    kind: hook_runner
+    description: Run configured post-tool hooks. Empty by default.
+    trigger: post_tool
+    hooks: []
+    tool_request_state_key: tool_request
+    output_state_key: hook_post_result
+
+  - id: tool_history_digest
+    kind: python_tool
+    description: Deterministic digest of recent tool results for the agent prompt (no raw bodies).
+    callable_path: backend.tools.agent_workflow.tool_history_digest
+    inputs:
+      tool_result_history: tool_result_history
+    output_state_key: tool_result_digest
+
+  - id: subagent_gate
+    kind: gate
+    description: Detect whether the last tool request asked for a subagent.
+    verdict_state_key: subagent_requested
+    pass_target: subagent_plan
+    fail_target: compaction_gate
+
+  - id: subagent_plan
+    kind: subagent_plan
+    description: Normalize the subagent tool request into concrete child task specs.
+    tool_request_state_key: tool_request
+    user_input_state_key: user_input
+    output_tasks_state_key: subagent_tasks
+
+  - id: subagent_context
+    kind: subagent_context
+    description: Build isolated per-task inputs (summary-oriented) for child workflow runs.
+    tasks_state_key: subagent_tasks
+    user_input_state_key: user_input
+    task_plan_state_key: task_plan
+    compacted_context_state_key: compacted_context
+    assembled_context_state_key: assembled_context
+    tool_result_history_state_key: tool_result_history
+    max_context_chars: 8000
+    output_child_inputs_state_key: subagent_child_inputs
+
+  - id: subagent_spawn
+    kind: subagent_spawn
+    description: Run each child task as an isolated YAML workflow under this parent run directory.
+    child_workflow: claude_code_subagent_workflow
+    child_inputs_state_key: subagent_child_inputs
+    execute_children: true
+    max_child_recursion: 30
+    output_child_runs_state_key: subagent_child_runs
+    lineage_dirname: subagent_runs
+
+  - id: subagent_join
+    kind: subagent_join
+    description: Normalize child run records (status, paths, answer excerpts).
+    child_runs_state_key: subagent_child_runs
+    output_joined_state_key: subagent_joined
+
+  - id: subagent_summarize
+    kind: subagent_summarize
+    description: Append summary-only subagent results for the lead agent loop.
+    joined_state_key: subagent_joined
+    output_state_key: subagent_results
+    history_state_key: tool_result_history
+    max_summary_chars: 4000
+
+  - id: compaction_gate
+    kind: gate
+    description: Trigger context compaction when tool history crosses the configured threshold.
+    verdict_state_key: context_pressure_exceeded
+    pass_target: context_compactor
+    fail_target: loop_gate
+
+  - id: context_compactor
+    kind: context_compactor
+    description: Deterministically preserve the most recent tool results and summarize dropped history.
+    history_state_key: tool_result_history
+    agent_messages_state_key: agent_messages
+    output_state_key: compacted_context
+    preserve_last_n: 3
+    max_chars: 8000
+    context_pressure_state_key: context_pressure_exceeded
+    pipeline:
+      - stage: rolling_summary
+        model: null
+        preserves_last_n_turns: 3
+      - stage: tool_result_pruning
+        max_verbose_turns: 5
+        max_chars: 4000
+      - stage: message_merging
+        collapse_same_role: true
+      - stage: semantic_dedup
+        similarity_threshold: 0.92
+      - stage: checkpoint_anchoring
+        replace_file_content_with: diff_refs
+    always_preserve:
+      - task_plan
+      - current_todo_list
+      - last_3_tool_results
+
+  - id: loop_gate
+    kind: gate
+    description: Stop when the parser marked a final response; otherwise loop back to the agent model.
+    verdict_state_key: agent_should_stop
+    termination_conditions:
+      - agent_should_stop == true
+      - user_interrupt
+      - budget.cost_usd_exceeded
+      - budget.latency_ms_exceeded
+      - permission_hard_block
+    checkpoint_on_any_termination: true
+    pass_target: __end__
+    fail_target: agent_model
+
+edges:
+  - from: startup
+    to: context_loader
+  - from: context_loader
+    to: planner
+  - from: planner
+    to: plan_normalize
+  - from: plan_normalize
+    to: plan_approval
+  - from: agent_model
+    to: agent_response_parser
+  - from: agent_response_parser
+    to: tool_route
+  - from: permission_gate
+    to: permission_route
+  - from: pre_tool_hooks
+    to: tool_executor
+  - from: tool_executor
+    to: post_tool_hooks
+  - from: post_tool_hooks
+    to: tool_history_digest
+  - from: tool_history_digest
+    to: subagent_gate
+  - from: subagent_plan
+    to: subagent_context
+  - from: subagent_context
+    to: subagent_spawn
+  - from: subagent_spawn
+    to: subagent_join
+  - from: subagent_join
+    to: subagent_summarize
+  - from: subagent_summarize
+    to: compaction_gate
+  - from: context_compactor
+    to: loop_gate
+
+loops:
+  - from: loop_gate
+    to: agent_model
+    max_iterations: 50

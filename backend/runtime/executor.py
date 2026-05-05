@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -12,17 +13,32 @@ from backend.budget.enforcer import BudgetEnforcer
 from backend.builder.api import GraphMetadata
 from backend.builder.compile import compile_to_langgraph
 from backend.builder.nodes import (
+    AgentContextNodeConfig,
+    AgentModelNodeConfig,
+    AgentResponseParserNodeConfig,
+    AgentStartupNodeConfig,
     ApprovalNodeConfig,
+    ContextCompactorNodeConfig,
     EmbeddingNodeConfig,
     GateNodeConfig,
+    HookRunnerNodeConfig,
     LLMNodeConfig,
     LoopConfig,
+    MemoryWriterNodeConfig,
     NodeConfig,
+    PermissionGateNodeConfig,
     PythonToolNodeConfig,
     RetrieverNodeConfig,
     RouterNodeConfig,
+    SubagentContextNodeConfig,
+    SubagentJoinNodeConfig,
+    SubagentOrchestratorNodeConfig,
+    SubagentPlanNodeConfig,
+    SubagentSpawnNodeConfig,
+    SubagentSummarizeNodeConfig,
     SubgraphNodeConfig,
     TesterNodeConfig,
+    ToolExecutorNodeConfig,
     VectorRetrieverNodeConfig,
 )
 from backend.runtime.cancellation import CancellationController
@@ -36,6 +52,23 @@ from backend.runtime.errors import (
     PendingApprovalError,
     PendingSubgraphApprovalError,
     WorkflowError,
+)
+from backend.runtime.nodes.agent import (
+    make_agent_context_node,
+    make_agent_model_node,
+    make_agent_response_parser_node,
+    make_agent_startup_node,
+    make_context_compactor_node,
+    make_hook_runner_node,
+    make_memory_writer_node,
+    make_permission_gate_node,
+    make_subagent_context_node,
+    make_subagent_join_node,
+    make_subagent_orchestrator_node,
+    make_subagent_plan_node,
+    make_subagent_spawn_node,
+    make_subagent_summarize_node,
+    make_tool_executor_node,
 )
 from backend.runtime.nodes.approval import make_approval_dispatcher, make_approval_node
 from backend.runtime.nodes.embedding import make_embedding_node
@@ -88,14 +121,131 @@ def _node_factory(
 
     def _make(cfg: NodeConfig, metadata: GraphMetadata):
         base = None
-        if isinstance(cfg, ApprovalNodeConfig):
+        if isinstance(cfg, AgentStartupNodeConfig):
+            base = make_agent_startup_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                audit=audit,
+            )
+        elif isinstance(cfg, AgentContextNodeConfig):
+            base = make_agent_context_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                audit=audit,
+            )
+        elif isinstance(cfg, AgentModelNodeConfig):
+            base = make_agent_model_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                on_cost=_on_cost,
+                cancellation=cancellation,
+                audit=audit,
+            )
+        elif isinstance(cfg, AgentResponseParserNodeConfig):
+            base = make_agent_response_parser_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                audit=audit,
+            )
+        elif isinstance(cfg, PermissionGateNodeConfig):
+            base = make_permission_gate_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                audit=audit,
+            )
+        elif isinstance(cfg, HookRunnerNodeConfig):
+            base = make_hook_runner_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                audit=audit,
+            )
+        elif isinstance(cfg, ToolExecutorNodeConfig):
+            base = make_tool_executor_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                audit=audit,
+            )
+        elif isinstance(cfg, ContextCompactorNodeConfig):
+            base = make_context_compactor_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                audit=audit,
+            )
+        elif isinstance(cfg, SubagentOrchestratorNodeConfig):
+            base = make_subagent_orchestrator_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                audit=audit,
+            )
+        elif isinstance(cfg, SubagentPlanNodeConfig):
+            base = make_subagent_plan_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                audit=audit,
+            )
+        elif isinstance(cfg, SubagentContextNodeConfig):
+            base = make_subagent_context_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                audit=audit,
+            )
+        elif isinstance(cfg, SubagentSpawnNodeConfig):
+            base = make_subagent_spawn_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                runs_root=runs_root,
+                on_cost=_on_cost,
+                audit=audit,
+            )
+        elif isinstance(cfg, SubagentJoinNodeConfig):
+            base = make_subagent_join_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                audit=audit,
+            )
+        elif isinstance(cfg, SubagentSummarizeNodeConfig):
+            base = make_subagent_summarize_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                audit=audit,
+            )
+        elif isinstance(cfg, MemoryWriterNodeConfig):
+            base = make_memory_writer_node(
+                cfg,
+                run_id=run_id,
+                graph_name=graph_name,
+                run_dir=run_dir,
+                audit=audit,
+            )
+        elif isinstance(cfg, ApprovalNodeConfig):
             return make_approval_node(
                 cfg,
                 run_id=run_id,
                 graph_name=graph_name,
                 run_dir=run_dir,
             )
-        if isinstance(cfg, LLMNodeConfig):
+        elif isinstance(cfg, LLMNodeConfig):
             base = make_llm_node(
                 cfg,
                 run_id=run_id,
@@ -231,6 +381,12 @@ def run_graph(
     write_audit_summary: bool = True,
     audit_context: dict[str, Any] | None = None,
 ) -> RunResult:
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:
+        pass
     run_id = run_id or make_run_id(metadata.name)
     run_dir = run_dir_override or run_dir_for_id(runs_root, metadata.name, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -442,6 +598,7 @@ def _run_compiled_app(
             status=status,
             error=error,
         )
+    _write_termination_artifact(run_dir, status=status, error=error, final_state=final_state)
 
     return RunResult(
         run_id=run_id,
@@ -453,3 +610,19 @@ def _run_compiled_app(
         latency_ms=enforcer.latency_ms(),
         run_dir=run_dir,
     )
+
+
+def _write_termination_artifact(run_dir: Path, *, status: str, error: str | None, final_state: dict) -> None:
+    reason = status
+    if status == "ok" and final_state.get("agent_should_stop"):
+        reason = "final_answer"
+    permission_decision = final_state.get("permission_decision")
+    if isinstance(permission_decision, dict) and permission_decision.get("hard_block"):
+        reason = "permission_hard_block"
+    payload = {
+        "status": status,
+        "reason": reason,
+        "error": error,
+        "checkpoint_flushed": True,
+    }
+    (run_dir / "termination.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")

@@ -8,7 +8,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from backend.runtime.artifacts import iter_run_dirs
+import backend.runtime.artifacts as run_artifacts
+from backend.runtime.artifacts import iter_run_dirs, run_search_roots_ordered
 
 CACHE_TTL_SECONDS = 2.0
 _CACHE_LOCK = threading.Lock()
@@ -17,16 +18,23 @@ _CACHE: dict[tuple[str, str, int], dict] = {}
 
 def compute_node_metrics(
     *,
-    runs_root: Path,
     workflow: str,
     node_ids: set[str],
     limit: int = 50,
+    runs_root: Path | None = None,
 ) -> dict[str, dict]:
-    selected_runs = _select_recent_runs(runs_root=runs_root, workflow=workflow, limit=limit)
+    if workflow.startswith("claude_code"):
+        selected_runs = _select_recent_runs_merged(workflow=workflow, limit=limit)
+        cache_key = ("merged", workflow, limit)
+    elif runs_root is not None:
+        selected_runs = _select_recent_runs(runs_root=runs_root, workflow=workflow, limit=limit)
+        cache_key = (str(runs_root.resolve()), workflow, limit)
+    else:
+        std = run_artifacts.RUNS_ROOT
+        selected_runs = _select_recent_runs(runs_root=std, workflow=workflow, limit=limit)
+        cache_key = (str(std.resolve()), workflow, limit)
     run_ids = [r["run_id"] for r in selected_runs]
     fingerprint = "|".join(run_ids)
-
-    cache_key = (str(runs_root.resolve()), workflow, limit)
     now = time.monotonic()
     with _CACHE_LOCK:
         cached = _CACHE.get(cache_key)
@@ -63,6 +71,14 @@ def _select_recent_runs(*, runs_root: Path, workflow: str, limit: int) -> list[d
                     "db_path": db,
                 }
             )
+    rows.sort(key=lambda r: r["started_ns"], reverse=True)
+    return rows[: max(0, limit)]
+
+
+def _select_recent_runs_merged(*, workflow: str, limit: int) -> list[dict]:
+    rows: list[dict] = []
+    for runs_root in run_search_roots_ordered():
+        rows.extend(_select_recent_runs(runs_root=runs_root, workflow=workflow, limit=limit * 3))
     rows.sort(key=lambda r: r["started_ns"], reverse=True)
     return rows[: max(0, limit)]
 

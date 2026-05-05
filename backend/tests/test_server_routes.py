@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+import backend.runtime.artifacts as artifacts
 from backend.server import routes
 from backend.server.app import app
 from backend.runtime.artifacts import resolve_run_dir, run_dir_for_id
@@ -70,7 +71,7 @@ def test_graph_node_metrics_endpoint(tmp_path: Path, monkeypatch):
     runs_root = tmp_path / "runs"
     runs_root.mkdir()
     _write_single_run(runs_root)
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
 
     client = TestClient(app)
     resp = client.get("/api/graph/coder_tester/node-metrics?limit=50")
@@ -91,7 +92,7 @@ def test_graph_node_metrics_rejects_bad_limit():
 
 def test_start_run_endpoint_runs_selected_workflow(tmp_path: Path, monkeypatch):
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     captured = {}
 
     def _fake_run_workflow_function(workflow, input_state, **kwargs):
@@ -129,7 +130,7 @@ def test_start_run_endpoint_runs_selected_workflow(tmp_path: Path, monkeypatch):
 
 def test_batch_run_endpoint_accepts_multiple_inputs(monkeypatch, tmp_path: Path):
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     captured = {}
 
     def _fake_run_workflow_batch(workflow, items, **kwargs):
@@ -387,7 +388,7 @@ def test_evaluate_proposal_runs_valid_yaml_with_mocked_provider(monkeypatch, tmp
         raise AssertionError("unexpected provider call")
 
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     monkeypatch.setattr("backend.providers.openrouter.stream_openrouter", _fake_stream_openrouter)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     before = Path("workflows/coder_tester.yaml").read_text(encoding="utf-8")
@@ -452,7 +453,7 @@ def test_optimize_proposals_valid_invalid_candidates_and_report(
         "- id: one\n  input: write fizzbuzz\n  expected: fizzbuzz\n  test_code: \"assert True\"\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
 
     current_yaml = Path("workflows/coder_tester.yaml").read_text(encoding="utf-8")
@@ -514,7 +515,7 @@ def test_optimize_proposals_cost_cap_stops_cleanly(monkeypatch, tmp_path: Path):
         "- id: one\n  input: write fizzbuzz\n  expected: fizzbuzz\n  test_code: \"assert True\"\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     monkeypatch.setattr(routes, "EVALS_ROOT", evals_root)
     current_yaml = Path("workflows/coder_tester.yaml").read_text(encoding="utf-8")
 
@@ -569,7 +570,7 @@ def test_list_approvals_and_run_detail_include_pending_approval(
     monkeypatch, tmp_path: Path
 ):
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     metadata = graph_spec_to_metadata(load_graph_spec("approval_review"))
     result = run_graph(
         metadata,
@@ -601,7 +602,7 @@ def test_list_approvals_and_run_detail_include_pending_approval(
 
 def _make_pending_approval_run(monkeypatch, tmp_path: Path, *, draft: str = "Draft text"):
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     metadata = graph_spec_to_metadata(load_graph_spec("approval_review"))
     result = run_graph(
         metadata,
@@ -760,7 +761,7 @@ def test_approval_decision_rejects_duplicate_decision(monkeypatch, tmp_path: Pat
 
 
 def test_approval_decision_missing_run_returns_404(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(routes, "RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", tmp_path / "runs")
     client = TestClient(app)
     resp = client.post(
         "/api/approvals/not_a_run/decision",
@@ -790,7 +791,7 @@ def test_approval_decision_non_pending_run_returns_400(monkeypatch, tmp_path: Pa
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
 
     client = TestClient(app)
     resp = client.post(
@@ -802,7 +803,7 @@ def test_approval_decision_non_pending_run_returns_400(monkeypatch, tmp_path: Pa
 
 def test_run_detail_includes_subgraph_parent_child_lineage(monkeypatch, tmp_path: Path):
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
 
     replies = [
         LLMResponse(text="refund window", usage=Usage(1, 1), model="gpt-4o-mini"),
@@ -848,7 +849,7 @@ def test_run_detail_ignores_malformed_subgraph_lineage(monkeypatch, tmp_path: Pa
     subgraphs.mkdir()
     (subgraphs / "bad.json").write_text("{not json", encoding="utf-8")
     (run_dir / "parent_run.json").write_text("{not json", encoding="utf-8")
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
 
     client = TestClient(app)
     resp = client.get("/api/runs/run_api")
@@ -1082,7 +1083,7 @@ def test_rollback_missing_workflow_or_snapshot_returns_404(monkeypatch, tmp_path
 def _make_pending_subgraph_approval_run(monkeypatch, tmp_path: Path):
     """Run approval_subgraph_wrapper until the child hits its approval node."""
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     replies = [
         LLMResponse(text="Draft answer for review.", usage=Usage(1, 1), model="gpt-4o-mini"),
     ]

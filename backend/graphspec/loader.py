@@ -12,14 +12,21 @@ from .models import BudgetSpec, EdgeSpec, GraphSpec, LoopSpec
 WORKFLOW_SPECS_ROOT = Path("workflows")
 
 
-def graph_spec_path(workflow_id: str, *, specs_root: Path = WORKFLOW_SPECS_ROOT) -> Path:
-    return specs_root / f"{workflow_id}.yaml"
+def _resolve_specs_root(specs_root: Path | None) -> Path:
+    """Use current ``WORKFLOW_SPECS_ROOT`` when unset (call-time, so tests/scripts can patch it)."""
+    return specs_root if specs_root is not None else WORKFLOW_SPECS_ROOT
+
+
+def graph_spec_path(workflow_id: str, *, specs_root: Path | None = None) -> Path:
+    root = _resolve_specs_root(specs_root)
+    return root / f"{workflow_id}.yaml"
 
 
 def load_graph_spec_source(
-    workflow_id: str, *, specs_root: Path = WORKFLOW_SPECS_ROOT
+    workflow_id: str, *, specs_root: Path | None = None
 ) -> tuple[GraphSpec, str, Path]:
-    path = graph_spec_path(workflow_id, specs_root=specs_root)
+    root = _resolve_specs_root(specs_root)
+    path = graph_spec_path(workflow_id, specs_root=root)
     if not path.exists():
         raise FileNotFoundError(f"workflow spec {path} does not exist")
     text = path.read_text(encoding="utf-8")
@@ -27,11 +34,11 @@ def load_graph_spec_source(
     if not isinstance(payload, dict):
         raise ValueError(f"workflow spec {path} must contain a YAML mapping")
     spec = GraphSpec.model_validate(payload)
-    _validate_subgraph_references(workflow_id, spec, specs_root=specs_root)
+    _validate_subgraph_references(workflow_id, spec, specs_root=root)
     return spec, text, path
 
 
-def load_graph_spec(workflow_id: str, *, specs_root: Path = WORKFLOW_SPECS_ROOT) -> GraphSpec:
+def load_graph_spec(workflow_id: str, *, specs_root: Path | None = None) -> GraphSpec:
     spec, _text, _path = load_graph_spec_source(workflow_id, specs_root=specs_root)
     return spec
 
@@ -99,12 +106,13 @@ def graph_spec_to_metadata(spec: GraphSpec) -> GraphMetadata:
     return builder.compile()
 
 
-def load_workflow_metadata(workflow_id: str, *, specs_root: Path = WORKFLOW_SPECS_ROOT) -> GraphMetadata:
+def load_workflow_metadata(workflow_id: str, *, specs_root: Path | None = None) -> GraphMetadata:
     return graph_spec_to_metadata(load_graph_spec(workflow_id, specs_root=specs_root))
 
 
-def list_workflow_ids(specs_root: Path = WORKFLOW_SPECS_ROOT) -> list[str]:
-    return sorted(p.stem for p in specs_root.glob("*.yaml") if p.is_file())
+def list_workflow_ids(specs_root: Path | None = None) -> list[str]:
+    root = _resolve_specs_root(specs_root)
+    return sorted(p.stem for p in root.glob("*.yaml") if p.is_file())
 
 
 def builder_to_graph_spec(builder: GraphBuilder) -> GraphSpec:

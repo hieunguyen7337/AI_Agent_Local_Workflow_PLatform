@@ -8,7 +8,8 @@ from typing import Any, Mapping, Sequence
 
 from backend.graphspec import load_workflow_metadata
 from backend.runtime.cancellation import CancellationController
-from backend.runtime.executor import RUNS_ROOT, run_graph
+from backend.runtime.artifacts import default_runs_root_for_workflow
+from backend.runtime.executor import run_graph
 
 DEFAULT_MAX_CONCURRENCY = 50
 
@@ -49,7 +50,7 @@ def run_workflow_function(
     input_state: Mapping[str, Any] | str,
     *,
     expected: str | None = None,
-    runs_root: Path = RUNS_ROOT,
+    runs_root: Path | None = None,
     run_id: str | None = None,
     thread_id: str | None = None,
     recursion_limit: int = 50,
@@ -60,6 +61,7 @@ def run_workflow_function(
     write_manifest_files: bool = True,
     write_audit_summary: bool = True,
     audit_context: dict[str, Any] | None = None,
+    workflow_specs_root: Path | None = None,
 ) -> WorkflowFunctionResult:
     """Run a YAML workflow as a reusable local function.
 
@@ -73,7 +75,9 @@ def run_workflow_function(
         expected = str(state["_expected"])
 
     initial_overrides = {k: v for k, v in state.items() if k not in {"user_input", "_expected"}}
-    metadata = load_workflow_metadata(workflow_id)
+    if runs_root is None:
+        runs_root = default_runs_root_for_workflow(workflow_id)
+    metadata = load_workflow_metadata(workflow_id, specs_root=workflow_specs_root)
     result = run_graph(
         metadata,
         user_input=user_input,
@@ -108,7 +112,7 @@ def run_workflow_batch(
     items: Sequence[WorkflowBatchItem],
     *,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
-    runs_root: Path = RUNS_ROOT,
+    runs_root: Path | None = None,
     cancellation: CancellationController | None = None,
     shared_run_dir: Path | None = None,
     use_checkpointer: bool = True,
@@ -122,6 +126,7 @@ def run_workflow_batch(
     """
     if max_concurrency < 1:
         raise ValueError("max_concurrency must be >= 1")
+    batch_runs_root = runs_root if runs_root is not None else default_runs_root_for_workflow(workflow_id)
     results: list[WorkflowBatchResult | None] = [None] * len(items)
     next_index = 0
 
@@ -131,7 +136,7 @@ def run_workflow_batch(
                 workflow_id,
                 item.input_state,
                 expected=item.expected,
-                runs_root=runs_root,
+                runs_root=batch_runs_root,
                 cancellation=cancellation,
                 run_dir_override=shared_run_dir,
                 use_checkpointer=use_checkpointer,

@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Primary workflow artifact tree (``runs/workflows/...``). Server and tests may replace
+# this module attribute to use a temp directory; keep in sync with API run resolution.
+RUNS_ROOT = Path("runs")
 
 AEST = timezone(timedelta(hours=10), name="AEST")
 AEST_UTC_OFFSET = "+10:00"
@@ -62,6 +69,41 @@ def run_dir_for_id(runs_root: Path, workflow: str, run_id: str) -> Path:
     return runs_root / "workflows" / workflow / run_date / run_id
 
 
+def claude_code_yaml_workflow_runs_root() -> Path:
+    """Dedicated artifact tree for ``claude_code*`` YAML workflows (stress/eval workspace).
+
+    Override with env ``CLAUDE_CODE_RUNS_ROOT``. Defaults to
+    ``<repo>/evals/claude_code_yaml_workflow/runs``.
+    """
+    env = os.environ.get("CLAUDE_CODE_RUNS_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    return (REPO_ROOT / "evals/claude_code_yaml_workflow/runs").resolve()
+
+
+def default_runs_root_for_workflow(workflow_id: str) -> Path:
+    """Where new runs are written: isolated tree for Claude Code YAML workflows."""
+    if workflow_id.startswith("claude_code"):
+        return claude_code_yaml_workflow_runs_root()
+    return RUNS_ROOT
+
+
+def run_search_roots_ordered() -> list[Path]:
+    """Ordered search paths for locating an existing run by id (API / approvals)."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for raw in (RUNS_ROOT, claude_code_yaml_workflow_runs_root()):
+        try:
+            rp = raw.resolve()
+        except OSError:
+            continue
+        key = str(rp)
+        if key not in seen:
+            seen.add(key)
+            roots.append(rp)
+    return roots
+
+
 def resolve_run_dir(runs_root: Path, run_id: str) -> Path:
     workflows_root = runs_root / "workflows"
     if not workflows_root.exists():
@@ -73,11 +115,34 @@ def resolve_run_dir(runs_root: Path, run_id: str) -> Path:
     raise FileNotFoundError(f"run {run_id!r} not found")
 
 
+def resolve_run_dir_any(run_id: str) -> tuple[Path, Path]:
+    """Find ``run_id`` under ``runs/`` or the Claude Code YAML eval runs root.
+
+    Returns ``(run_dir, runs_root)`` where ``runs_root`` is the tree root used (parent of
+    ``workflows/``), for continuation runs that must land in the same tree.
+    """
+    last: FileNotFoundError | None = None
+    for runs_root in run_search_roots_ordered():
+        try:
+            return resolve_run_dir(runs_root, run_id), runs_root
+        except FileNotFoundError as exc:
+            last = exc
+    raise FileNotFoundError(f"run {run_id!r} not found") from last
+
+
 def iter_run_dirs(runs_root: Path) -> list[Path]:
     workflows_root = runs_root / "workflows"
     if not workflows_root.exists():
         return []
     return [path for path in workflows_root.glob("*/*/run_*") if path.is_dir()]
+
+
+def iter_all_run_dirs() -> list[Path]:
+    """All run directories under default ``runs/`` and Claude Code eval runs root."""
+    out: list[Path] = []
+    for root in run_search_roots_ordered():
+        out.extend(iter_run_dirs(root))
+    return out
 
 
 def artifact_paths(run_dir: Path) -> dict[str, str]:

@@ -13,7 +13,25 @@ from .loader import (
     load_graph_spec_source,
     load_workflow_metadata,
 )
-from backend.builder.nodes import ApprovalNodeConfig, SubgraphNodeConfig
+from backend.builder.nodes import (
+    AgentContextNodeConfig,
+    AgentModelNodeConfig,
+    AgentResponseParserNodeConfig,
+    AgentStartupNodeConfig,
+    ApprovalNodeConfig,
+    ContextCompactorNodeConfig,
+    HookRunnerNodeConfig,
+    MemoryWriterNodeConfig,
+    PermissionGateNodeConfig,
+    SubagentContextNodeConfig,
+    SubagentJoinNodeConfig,
+    SubagentOrchestratorNodeConfig,
+    SubagentPlanNodeConfig,
+    SubagentSpawnNodeConfig,
+    SubagentSummarizeNodeConfig,
+    SubgraphNodeConfig,
+    ToolExecutorNodeConfig,
+)
 
 from .models import BudgetSpec, EdgeSpec, GraphSpec, LoopSpec, TemplateParameterSpec
 from .apply import AppliedProposal, apply_graph_spec_proposal
@@ -31,12 +49,25 @@ from .rollback import (
 
 __all__ = [
     "AppliedProposal",
+    "AgentContextNodeConfig",
+    "AgentModelNodeConfig",
+    "AgentResponseParserNodeConfig",
+    "AgentStartupNodeConfig",
     "ApprovalNodeConfig",
     "BudgetSpec",
+    "ContextCompactorNodeConfig",
     "CopiedTemplate",
     "EdgeSpec",
     "GraphSpec",
+    "HookRunnerNodeConfig",
+    "MemoryWriterNodeConfig",
     "LoopSpec",
+    "PermissionGateNodeConfig",
+    "SubagentContextNodeConfig",
+    "SubagentJoinNodeConfig",
+    "SubagentPlanNodeConfig",
+    "SubagentSpawnNodeConfig",
+    "SubagentSummarizeNodeConfig",
     "TemplateParameterSpec",
     "MutationProposal",
     "OptimizationCandidate",
@@ -44,7 +75,9 @@ __all__ = [
     "RestoredRollback",
     "RollbackPreview",
     "RollbackSnapshot",
+    "SubagentOrchestratorNodeConfig",
     "SubgraphNodeConfig",
+    "ToolExecutorNodeConfig",
     "builder_to_graph_spec",
     "graph_spec_path",
     "graph_spec_to_metadata",

@@ -8,15 +8,30 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from backend.builder.api import END
 from backend.builder.nodes import (
+    AgentContextNodeConfig,
+    AgentModelNodeConfig,
+    AgentResponseParserNodeConfig,
+    AgentStartupNodeConfig,
     ApprovalNodeConfig,
+    ContextCompactorNodeConfig,
     EmbeddingNodeConfig,
     GateNodeConfig,
+    HookRunnerNodeConfig,
     LLMNodeConfig,
+    MemoryWriterNodeConfig,
+    PermissionGateNodeConfig,
     PythonToolNodeConfig,
     RetrieverNodeConfig,
     RouterNodeConfig,
+    SubagentContextNodeConfig,
+    SubagentJoinNodeConfig,
+    SubagentOrchestratorNodeConfig,
+    SubagentPlanNodeConfig,
+    SubagentSpawnNodeConfig,
+    SubagentSummarizeNodeConfig,
     SubgraphNodeConfig,
     TesterNodeConfig,
+    ToolExecutorNodeConfig,
     VectorRetrieverNodeConfig,
 )
 
@@ -32,7 +47,22 @@ GraphNodeSpec = Annotated[
     | RouterNodeConfig
     | ApprovalNodeConfig
     | SubgraphNodeConfig
-    | PythonToolNodeConfig,
+    | PythonToolNodeConfig
+    | AgentContextNodeConfig
+    | AgentStartupNodeConfig
+    | AgentModelNodeConfig
+    | AgentResponseParserNodeConfig
+    | PermissionGateNodeConfig
+    | HookRunnerNodeConfig
+    | ToolExecutorNodeConfig
+    | ContextCompactorNodeConfig
+    | MemoryWriterNodeConfig
+    | SubagentOrchestratorNodeConfig
+    | SubagentPlanNodeConfig
+    | SubagentContextNodeConfig
+    | SubagentSpawnNodeConfig
+    | SubagentJoinNodeConfig
+    | SubagentSummarizeNodeConfig,
     Field(discriminator="kind"),
 ]
 

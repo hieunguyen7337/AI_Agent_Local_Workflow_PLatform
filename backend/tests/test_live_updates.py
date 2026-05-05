@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import backend.runtime.artifacts as artifacts
 from backend.server import app as app_module
 from backend.server import routes
 from backend.runtime.artifacts import resolve_run_dir, run_dir_for_id
@@ -94,7 +95,7 @@ def _recv_until(ws, predicate, max_messages: int = 100):
 def test_ws_live_run_events_and_metrics(tmp_path: Path, monkeypatch):
     runs_root = tmp_path / "runs"
     runs_root.mkdir()
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     app_module.live_service.runs_root = runs_root
     app_module.live_service.poll_interval_s = 0.05
     app_module.live_service.heartbeat_interval_s = 0.1
@@ -171,7 +172,7 @@ def test_ws_live_no_duplicate_run_events_and_workflow_scoped_metrics(tmp_path: P
         ended_ns=20,
     )
 
-    monkeypatch.setattr(routes, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
     app_module.live_service.runs_root = runs_root
     app_module.live_service.poll_interval_s = 0.05
     app_module.live_service.heartbeat_interval_s = 0.1

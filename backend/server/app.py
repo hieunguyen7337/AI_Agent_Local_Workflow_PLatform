@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
+import backend.runtime.artifacts as run_artifacts
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .live import LiveUpdateService
-from .routes import RUNS_ROOT, router
+from .routes import router
 
-live_service = LiveUpdateService(runs_root=RUNS_ROOT)
+live_service = LiveUpdateService(runs_root=run_artifacts.RUNS_ROOT)
 
 
 @asynccontextmanager

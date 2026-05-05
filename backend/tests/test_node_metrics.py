@@ -108,10 +108,10 @@ def test_compute_node_metrics_aggregate_and_retries(tmp_path: Path):
     )
 
     metrics = compute_node_metrics(
-        runs_root=runs_root,
         workflow="coder_tester",
         node_ids={"planner", "tester", "gate"},
         limit=50,
+        runs_root=runs_root,
     )
 
     tester = metrics["tester"]

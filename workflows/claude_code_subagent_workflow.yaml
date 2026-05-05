@@ -1,0 +1,259 @@
+schema_version: workflow.graph/v1
+name: claude_code_subagent_workflow
+description: >-
+  Delegated subagent loop — isolated context in user_input, no plan-approval gate,
+  auto-approved tools, no nested subagent tool. Used as a child run from claude_code_yaml_workflow.
+category: coding
+tags:
+  - subagent
+  - delegated
+budget:
+  cost_usd: 0.50
+  latency_ms: 300000
+entry: startup
+nodes:
+  - id: startup
+    kind: agent_startup
+    description: Local startup for delegated subagent run.
+    output_state_key: runtime_config
+    provider_env_vars:
+      - OPENROUTER_API_KEY
+      - OPENAI_API_KEY
+    policy_config_path: .claude/agent_policy.json
+    mcp_registry:
+      transports:
+        - stdio
+      capability_registration: runtime
+      context_cost: token_free
+      health_check: on_startup
+      servers: []
+
+  - id: context_loader
+    kind: agent_context
+    description: Load project context; parent briefing is already in user_input.
+    runtime_config_state_key: runtime_config
+    memory_sources: []
+    include_files:
+      - AGENTS.md
+    output_state_key: assembled_context
+    max_file_chars: 4000
+
+  - id: agent_model
+    kind: agent_model
+    provider: openrouter
+    model: x-ai/grok-4.3
+    system_prompt: |-
+      You are a delegated subagent with an isolated context window.
+      Choose exactly one action per turn. Do not delegate to another subagent.
+
+      Respond with strict JSON in one of these forms:
+      {{"final_answer": "concise answer for the parent agent"}}
+      {{"tool_request": {{"name": "read_file", "args": {{"path": "relative/path"}}}}}}
+      {{"tool_request": {{"name": "glob", "args": {{"pattern": "**/*.py"}}}}}}
+      {{"tool_request": {{"name": "search", "args": {{"pattern": "text", "path": ".", "include": "*.py"}}}}}}
+      {{"tool_request": {{"name": "write_file", "args": {{"path": "relative/path", "content": "complete file content"}}}}}}
+      {{"tool_request": {{"name": "shell", "args": {{"command": "command to run"}}}}}}
+
+      Paths for read_file, search, and write_file must be relative to the workspace root (forward
+      slashes). Never use Windows drive letters or absolute paths outside the workspace.
+    user_prompt_template: |-
+      Task and briefing (authoritative):
+      {user_input}
+
+      Assembled workspace context:
+      {assembled_context}
+
+      Compacted context:
+      {compacted_context}
+
+      Prior tool digest (bounded summaries only):
+      {tool_result_digest}
+    output_state_key: agent_model_response
+    temperature: 0.2
+
+  - id: agent_response_parser
+    kind: agent_response_parser
+    input_state_key: agent_model_response
+    route_state_key: agent_route
+    tool_request_state_key: tool_request
+    final_answer_state_key: final_answer
+    should_stop_state_key: agent_should_stop
+
+  - id: tool_route
+    kind: router
+    route_state_key: agent_route
+    routes:
+      FINAL: loop_gate
+      TOOL: permission_gate
+    default_target: loop_gate
+
+  - id: permission_gate
+    kind: permission_gate
+    description: Auto-approve safe local tools for unattended subagent runs.
+    mode: auto_approve
+    ml_classifier: false
+    policy_stack:
+      - source: runtime_default
+        precedence: 0
+    escalate_on:
+      - shell_with_sudo
+      - network_egress
+    never_restore_on_resume: true
+    tool_request_state_key: tool_request
+    route_state_key: permission_route
+    decision_state_key: permission_decision
+    history_state_key: tool_result_history
+    write_scope: cwd_only
+
+  - id: permission_route
+    kind: router
+    route_state_key: permission_route
+    routes:
+      APPROVED: pre_tool_hooks
+      ASK: tool_approval
+      DENIED: loop_gate
+    default_target: loop_gate
+
+  - id: tool_approval
+    kind: approval
+    description: Rare human gate if policy escalates to ASK.
+    prompt: Approve the subagent tool request.
+    approval_state_key: tool_approval_decision
+    approved_target: pre_tool_hooks
+    rejected_target: loop_gate
+
+  - id: pre_tool_hooks
+    kind: hook_runner
+    trigger: pre_tool
+    hooks: []
+    tool_request_state_key: tool_request
+    output_state_key: hook_pre_result
+
+  - id: tool_executor
+    kind: tool_executor
+    tool_request_state_key: tool_request
+    output_state_key: tool_result
+    history_state_key: tool_result_history
+    runtime_config_state_key: runtime_config
+    tools:
+      - id: read_file
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: true
+        permission_required: false
+      - id: glob
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: true
+        permission_required: false
+      - id: search
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: true
+        permission_required: false
+      - id: write_file
+        bucket: fs_tools
+        reversible: true
+        is_concurrency_safe: false
+        permission_required: true
+        checkpoint_before_write: true
+      - id: shell
+        bucket: shell_tools
+        reversible: false
+        is_concurrency_safe: false
+        permission_required: true
+        windows_fallback: powershell
+    cwd_only: true
+    context_pressure_state_key: context_pressure_exceeded
+    compaction_threshold_chars: 12000
+
+  - id: post_tool_hooks
+    kind: hook_runner
+    trigger: post_tool
+    hooks: []
+    tool_request_state_key: tool_request
+    output_state_key: hook_post_result
+
+  - id: tool_history_digest
+    kind: python_tool
+    description: Compact tool_result_history into bounded-lines digest for the subagent prompt.
+    callable_path: backend.tools.agent_workflow.tool_history_digest
+    inputs:
+      tool_result_history: tool_result_history
+    output_state_key: tool_result_digest
+
+  - id: subagent_gate
+    kind: gate
+    description: No nested subagent tool in this workflow; always skip fan-out.
+    verdict_state_key: subagent_requested
+    pass_target: compaction_gate
+    fail_target: compaction_gate
+
+  - id: compaction_gate
+    kind: gate
+    verdict_state_key: context_pressure_exceeded
+    pass_target: context_compactor
+    fail_target: loop_gate
+
+  - id: context_compactor
+    kind: context_compactor
+    history_state_key: tool_result_history
+    agent_messages_state_key: agent_messages
+    output_state_key: compacted_context
+    preserve_last_n: 3
+    max_chars: 8000
+    context_pressure_state_key: context_pressure_exceeded
+    pipeline:
+      - stage: rolling_summary
+        model: null
+        preserves_last_n_turns: 3
+      - stage: tool_result_pruning
+        max_verbose_turns: 5
+        max_chars: 4000
+      - stage: message_merging
+        collapse_same_role: true
+      - stage: semantic_dedup
+        similarity_threshold: 0.92
+      - stage: checkpoint_anchoring
+        replace_file_content_with: diff_refs
+    always_preserve:
+      - task_plan
+      - last_3_tool_results
+
+  - id: loop_gate
+    kind: gate
+    verdict_state_key: agent_should_stop
+    termination_conditions:
+      - agent_should_stop == true
+      - budget.cost_usd_exceeded
+      - budget.latency_ms_exceeded
+    checkpoint_on_any_termination: true
+    pass_target: __end__
+    fail_target: agent_model
+
+edges:
+  - from: startup
+    to: context_loader
+  - from: context_loader
+    to: agent_model
+  - from: agent_model
+    to: agent_response_parser
+  - from: agent_response_parser
+    to: tool_route
+  - from: permission_gate
+    to: permission_route
+  - from: pre_tool_hooks
+    to: tool_executor
+  - from: tool_executor
+    to: post_tool_hooks
+  - from: post_tool_hooks
+    to: tool_history_digest
+  - from: tool_history_digest
+    to: subagent_gate
+  - from: context_compactor
+    to: loop_gate
+
+loops:
+  - from: loop_gate
+    to: agent_model
+    max_iterations: 25

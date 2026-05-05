@@ -10,7 +10,7 @@ from typing import Literal
 
 from backend.graphspec import load_workflow_metadata
 from backend.builder.api import GraphMetadata
-from backend.runtime.artifacts import resolve_run_dir, update_run_manifest
+from backend.runtime.artifacts import resolve_run_dir, resolve_run_dir_any, update_run_manifest
 from backend.runtime.executor import RunResult, run_graph
 
 
@@ -58,11 +58,14 @@ def decide_approval(
     decision: DecisionValue,
     reviewer: str | None = None,
     comment: str | None = None,
-    runs_root: Path = Path("runs"),
+    runs_root: Path | None = None,
     metadata: GraphMetadata | None = None,
 ) -> ApprovalDecisionResult:
     try:
-        source_run_dir = resolve_run_dir(runs_root, run_id)
+        if runs_root is None:
+            source_run_dir, runs_root = resolve_run_dir_any(run_id)
+        else:
+            source_run_dir = resolve_run_dir(runs_root, run_id)
     except FileNotFoundError as exc:
         raise ApprovalNotFoundError(f"pending approval for run {run_id!r} not found") from exc
     approval_path = source_run_dir / "approval.json"
@@ -128,7 +131,10 @@ def decide_approval(
             outputs_map: dict[str, str] = parent_run_info.get("outputs") or {}
 
             if parent_run_id and parent_workflow and parent_subgraph_node_id:
-                parent_run_dir = resolve_run_dir(runs_root, parent_run_id)
+                try:
+                    parent_run_dir = resolve_run_dir(runs_root, parent_run_id)
+                except FileNotFoundError:
+                    parent_run_dir = resolve_run_dir_any(parent_run_id)[0]
                 pending_path = parent_run_dir / "pending_subgraph_approval.json"
                 if pending_path.exists():
                     pending = json.loads(pending_path.read_text(encoding="utf-8"))

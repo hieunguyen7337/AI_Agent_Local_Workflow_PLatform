@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+import backend.runtime.artifacts as run_artifacts
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
@@ -38,7 +39,12 @@ from backend.graphspec import (
 )
 from backend.graphspec.loader import WORKFLOW_SPECS_ROOT
 from backend.providers.base import ProviderError
-from backend.runtime.artifacts import artifact_paths, iter_run_dirs, resolve_run_dir
+from backend.runtime.artifacts import (
+    artifact_paths,
+    iter_all_run_dirs,
+    iter_run_dirs,
+    resolve_run_dir_any,
+)
 from backend.runtime.executor import run_graph
 from backend.runtime.functions import (
     DEFAULT_MAX_CONCURRENCY,
@@ -50,8 +56,7 @@ from backend.server.node_metrics import compute_node_metrics
 
 router = APIRouter()
 
-RUNS_ROOT = Path("runs")
-SPEC_AUDIT_ROOT = RUNS_ROOT / "spec_audit"
+SPEC_AUDIT_ROOT = run_artifacts.RUNS_ROOT / "spec_audit"
 
 
 class MutationProposalRequest(BaseModel):
@@ -563,7 +568,7 @@ def post_spec_proposal_eval(workflow: str, request: ProposalEvaluationRequest) -
     if not fixtures_path.exists():
         raise HTTPException(404, f"eval fixtures for workflow {workflow!r} not found")
 
-    proposal_root = RUNS_ROOT / f"proposal_eval_{workflow}_{int(time.time())}"
+    proposal_root = run_artifacts.RUNS_ROOT / f"proposal_eval_{workflow}_{int(time.time())}"
     output_path = proposal_root / "eval.json"
     out = run_eval_for_metadata(
         workflow=workflow,
@@ -600,7 +605,7 @@ def post_spec_optimize_proposals(workflow: str, request: OptimizeProposalsReques
             candidate_count=request.candidate_count,
             n_per_fixture=request.n_per_fixture,
             max_cost_usd=request.max_cost_usd,
-            runs_root=RUNS_ROOT,
+            runs_root=run_artifacts.RUNS_ROOT,
             evals_root=EVALS_ROOT,
         )
     except FileNotFoundError as exc:
@@ -642,7 +647,6 @@ def get_graph_node_metrics(workflow: str, limit: int = 50) -> dict:
         raise HTTPException(400, "limit must be > 0")
     metadata = load_workflow(workflow)
     metrics = compute_node_metrics(
-        runs_root=RUNS_ROOT,
         workflow=workflow,
         node_ids=set(metadata.nodes.keys()),
         limit=min(limit, 500),
@@ -658,7 +662,7 @@ def get_graph_node_metrics(workflow: str, limit: int = 50) -> dict:
 
 @router.get("/api/runs")
 def list_runs(limit: int = 50) -> list[dict]:
-    return list_runs_data(runs_root=RUNS_ROOT, limit=limit)
+    return list_runs_data(runs_root=None, limit=limit)
 
 
 @router.post("/api/runs")
@@ -668,7 +672,7 @@ def start_run(request: StartRunRequest, workflow: str) -> dict:
             workflow,
             request.input,
             expected=request.expected,
-            runs_root=RUNS_ROOT,
+            runs_root=run_artifacts.RUNS_ROOT,
         )
     except FileNotFoundError:
         raise HTTPException(404, f"workflow {workflow!r} not found")
@@ -699,7 +703,7 @@ def post_workflow_batch_run(workflow: str, request: BatchRunRequest) -> dict:
             for item in request.items
         ],
         max_concurrency=request.max_concurrency,
-        runs_root=RUNS_ROOT,
+        runs_root=run_artifacts.RUNS_ROOT,
     )
     return {
         "workflow": workflow,
@@ -723,7 +727,7 @@ def post_workflow_batch_run(workflow: str, request: BatchRunRequest) -> dict:
 def list_approvals(status: str = "pending") -> list[dict]:
     if status not in {"pending", "decided", "all"}:
         raise HTTPException(400, "status must be one of: pending, decided, all")
-    return list_approval_data(runs_root=RUNS_ROOT, status=status)
+    return list_approval_data(runs_root=None, status=status)
 
 
 @router.post("/api/approvals/{run_id}/decision")
@@ -734,7 +738,6 @@ def post_approval_decision(run_id: str, request: ApprovalDecisionRequest) -> dic
             decision=request.decision,  # type: ignore[arg-type]
             reviewer=request.reviewer,
             comment=request.comment,
-            runs_root=RUNS_ROOT,
         )
     except ApprovalNotFoundError as exc:
         raise HTTPException(404, str(exc))
@@ -768,11 +771,12 @@ def post_approval_decision(run_id: str, request: ApprovalDecisionRequest) -> dic
     return response
 
 
-def list_approval_data(*, runs_root: Path, status: str = "pending") -> list[dict[str, Any]]:
-    if not runs_root.exists():
+def list_approval_data(*, runs_root: Path | None = None, status: str = "pending") -> list[dict[str, Any]]:
+    if runs_root is not None and not runs_root.exists():
         return []
+    run_dirs = iter_run_dirs(runs_root) if runs_root is not None else iter_all_run_dirs()
     approvals: list[dict[str, Any]] = []
-    for run_dir in iter_run_dirs(runs_root):
+    for run_dir in run_dirs:
         path = run_dir / "approval.json"
         if not path.exists():
             continue
@@ -799,12 +803,13 @@ def list_approval_data(*, runs_root: Path, status: str = "pending") -> list[dict
     return approvals
 
 
-def list_runs_data(*, runs_root: Path, limit: int = 50) -> list[dict[str, Any]]:
-    """Aggregate all runs across per-run SQLite databases under runs/."""
-    if not runs_root.exists():
+def list_runs_data(*, runs_root: Path | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    """Aggregate all runs across per-run SQLite databases under ``runs/`` and Claude Code eval runs."""
+    if runs_root is not None and not runs_root.exists():
         return []
+    dirs = iter_run_dirs(runs_root) if runs_root is not None else iter_all_run_dirs()
     out: list[dict[str, Any]] = []
-    for d in iter_run_dirs(runs_root):
+    for d in dirs:
         db = d / "telemetry.db"
         if not db.exists():
             continue
@@ -837,7 +842,7 @@ def list_runs_data(*, runs_root: Path, limit: int = 50) -> list[dict[str, Any]]:
 
 @router.get("/api/runs/{run_id}")
 def get_run(run_id: str) -> dict:
-    run = get_run_data(runs_root=RUNS_ROOT, run_id=run_id)
+    run = get_run_data(run_id=run_id)
     if run is None:
         raise HTTPException(404, f"run {run_id!r} not found")
     return run
@@ -845,7 +850,7 @@ def get_run(run_id: str) -> dict:
 
 @router.get("/api/evals")
 def list_dataset_evals(limit: int = 20) -> list[dict[str, Any]]:
-    evals_root = RUNS_ROOT / "evals"
+    evals_root = run_artifacts.RUNS_ROOT / "evals"
     if not evals_root.exists():
         return []
     items: list[dict[str, Any]] = []
@@ -871,7 +876,7 @@ def list_dataset_evals(limit: int = 20) -> list[dict[str, Any]]:
 
 @router.get("/api/evals/{workflow}/{eval_id}")
 def get_dataset_eval(workflow: str, eval_id: str) -> dict[str, Any]:
-    eval_root = RUNS_ROOT / "evals" / workflow / eval_id
+    eval_root = run_artifacts.RUNS_ROOT / "evals" / workflow / eval_id
     summary_path = eval_root / "eval_summary.json"
     if not summary_path.exists():
         raise HTTPException(404, f"eval {workflow}/{eval_id!r} not found")
@@ -887,9 +892,9 @@ def get_dataset_eval(workflow: str, eval_id: str) -> dict[str, Any]:
     }
 
 
-def get_run_data(*, runs_root: Path, run_id: str) -> dict[str, Any] | None:
+def get_run_data(*, run_id: str) -> dict[str, Any] | None:
     try:
-        run_dir = resolve_run_dir(runs_root, run_id)
+        run_dir = resolve_run_dir_any(run_id)[0]
     except FileNotFoundError:
         return None
     db = run_dir / "telemetry.db"
