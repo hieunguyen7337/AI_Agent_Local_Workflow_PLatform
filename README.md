@@ -30,7 +30,7 @@ Each workflow should be built from a simple source-of-truth file that is easy fo
 - Workflow defaults: `coder_tester` -> OpenRouter `minimax/minimax-m2.7`; `linear_rag`, `supervisor_loop`, and `dispatch_aggregate` -> OpenAI `gpt-4o-mini`
 - Pricing: provider/model rates loaded from `prices.yaml`; budget correctness does not depend on provider stream-abort support
 
-See [docs/graphspec_decision.md](docs/graphspec_decision.md) for the source-of-truth decision, [docs/workflow_library.md](docs/workflow_library.md) for workflow library conventions, [docs/run_artifacts.md](docs/run_artifacts.md) for how to inspect run files, [docs/ui_vision_audit.md](docs/ui_vision_audit.md) for the UI smoke checklist, [claude_full_plan.md](claude_full_plan.md) for the base architecture, and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
+See [presentation_deck_v4.pptx](presentation_deck_v4.pptx) as a project overview source, [docs/graphspec_decision.md](docs/graphspec_decision.md) for the source-of-truth decision, [docs/workflow_library.md](docs/workflow_library.md) for workflow library conventions, [docs/run_artifacts.md](docs/run_artifacts.md) for how to inspect run files, [docs/ui_vision_audit.md](docs/ui_vision_audit.md) for the UI smoke checklist, [claude_full_plan.md](claude_full_plan.md) for the base architecture, and [FUTURE_SCOPE.md](FUTURE_SCOPE.md) for deferred items.
 
 ## Full Setup (Windows PowerShell)
 
