@@ -1,7 +1,7 @@
-# Local AI Workflow Platform - M5.19
+# Local AI Workflow Platform - V0.5.19
 
 A local-first platform to author, run, visualize, and iterate on AI workflows.
-M5.19 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, a searchable category-grouped workflow library selector with validation and eval quality signals, YAML-native reusable workflow templates with read-only parameter metadata and copy ergonomics, a workflow-as-function Python runtime, batch execution for multiple inputs, and parallelized fixture/dataset evals:
+V0.5.19 uses declarative YAML workflow specs as the editable source of truth, validated by Pydantic `GraphSpec`, reviewed in a graph-first workbench, and compiled into the existing LangGraph runtime with YAML-only workflow loading, structured run artifacts, human approval interrupts, forked continuation runs, an approval workbench, approval-aware eval coverage, reusable collapsed subgraphs with nested approval support, richer parent/child subgraph review, multi-proposal optimization reports, audited rollback restore, a cleaner Inspect/Run/Improve/Recover UI loop, a searchable category-grouped workflow library selector with validation and eval quality signals, YAML-native reusable workflow templates with read-only parameter metadata and copy ergonomics, a workflow-as-function Python runtime, batch execution for multiple inputs, and parallelized fixture/dataset evals:
 
 ## Vision
 
@@ -73,7 +73,7 @@ npm install
 cd ..
 ```
 
-## Verify M5.19 End-to-End
+## Verify V0.5.19 End-to-End
 
 From repo root (Windows commands shown):
 
@@ -512,7 +512,7 @@ runs/spec_audit/<workflow>/<timestamp>/original.yaml
 runs/spec_audit/<new_workflow_id>/<timestamp>/audit.json
 ```
 
-## M5.19 Limits (by design)
+## V0.5.19 Limits (by design)
 
 - Seven reference workflows plus one copyable starter template; the selector is dynamic so new `.yaml` files appear automatically and are grouped by YAML `category`
 - Workflow specs remain flat under `workflows/*.yaml`; subdirectories and path-like workflow ids are deferred until category/tag navigation is insufficient
