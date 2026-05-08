@@ -11,6 +11,12 @@ import yaml
 from pydantic import BaseModel, Field
 
 from backend.evals.metrics import summarize
+from backend.repo_root import (
+    find_repo_root,
+    looks_like_dataset_path_string,
+    resolve_dataset_eval_config_path,
+    resolve_dataset_path_str,
+)
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.artifacts import AEST_UTC_OFFSET, make_eval_id
 from backend.runtime.functions import DEFAULT_MAX_CONCURRENCY, WorkflowBatchItem, run_workflow_batch
@@ -33,8 +39,11 @@ def run_dataset_eval(
     max_concurrency: int | None = None,
     cancellation: CancellationController | None = None,
 ) -> dict[str, Any]:
+    repo_root = find_repo_root()
     config = load_dataset_eval_config(config_path)
-    dataset_path = _resolve_path(config.dataset_path, base=config_path.parent)
+    dataset_path = resolve_dataset_eval_config_path(
+        config.dataset_path, base=config_path.parent, repo_root=repo_root
+    )
     dataset_format = config.dataset_format or _infer_dataset_format(dataset_path)
     rows = load_dataset_rows(dataset_path, dataset_format)
 
@@ -42,7 +51,7 @@ def run_dataset_eval(
     eval_root = output_path.parent if output_path else runs_root / "evals" / workflow / make_eval_id(workflow, suffix=suffix)
     output_path = output_path or eval_root / "eval_summary.json"
 
-    input_states = [_map_input_state(row, config.input_mapping) for row in rows]
+    input_states = [_map_input_state(row, config.input_mapping, repo_root=repo_root) for row in rows]
     batch_results = run_workflow_batch(
         workflow,
         [
@@ -219,13 +228,29 @@ def load_dataset_rows(path: Path, dataset_format: str) -> list[dict[str, Any]]:
     raise ValueError(f"Unsupported dataset format {dataset_format!r}")
 
 
-def _map_input_state(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
+def _map_input_state(
+    row: dict[str, Any], mapping: dict[str, str], *, repo_root: Path | None = None
+) -> dict[str, Any]:
+    root = repo_root or find_repo_root()
     if not mapping:
-        return dict(row)
-    state: dict[str, Any] = {}
-    for state_key, row_path in mapping.items():
-        _set_path(state, state_key, _get_path(row, row_path))
-    return state
+        state = dict(row)
+    else:
+        state = {}
+        for state_key, row_path in mapping.items():
+            _set_path(state, state_key, _get_path(row, row_path))
+    return _resolve_paths_in_structure(state, root)
+
+
+def _resolve_paths_in_structure(obj: Any, repo_root: Path) -> Any:
+    if isinstance(obj, str):
+        if looks_like_dataset_path_string(obj):
+            return resolve_dataset_path_str(obj, repo_root=repo_root)
+        return obj
+    if isinstance(obj, dict):
+        return {key: _resolve_paths_in_structure(val, repo_root) for key, val in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_paths_in_structure(item, repo_root) for item in obj]
+    return obj
 
 
 def _score(scorer: dict[str, Any], *, row: dict[str, Any], final_state: dict[str, Any]) -> dict[str, Any]:
@@ -452,10 +477,6 @@ def _compute_map_cmc(
 
     return {"ap": ap, **{f"cmc_{k}": (1 if found_at is not None and found_at <= k else 0) for k in cmc_ks}}
 
-
-def _resolve_path(path: str, *, base: Path) -> Path:
-    candidate = Path(path)
-    return candidate if candidate.is_absolute() else base / candidate
 
 
 def _infer_dataset_format(path: Path) -> Literal["csv", "jsonl", "yaml"]:

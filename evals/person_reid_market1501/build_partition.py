@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from backend.repo_root import find_repo_root, to_repo_posix
+
 _FILENAME_RE = re.compile(r"^(\d+)_c(\d+)s\d+_\d+_\d+\.jpg$")
 _DEFAULT_OUTPUT = Path(__file__).parent / "partition_1000q_5000g"
 _DEFAULT_DESCRIPTION_DB_DIRNAME = "description_db_google_gemma_4_31b_it"
@@ -86,6 +88,7 @@ def build_partition(
 
     gallery_rows = sorted(selected_gallery.values(), key=lambda item: item[0])
     query_rows = sorted(selected_queries, key=lambda item: item[0])
+    repo_root = find_repo_root()
 
     out_query_dir = output_dir / "query"
     out_gallery_dir = output_dir / "bounding_box_test"
@@ -102,21 +105,27 @@ def build_partition(
     gallery_ids = [gid for gid, _path, _pid, _camid in gallery_rows]
     gallery_pids = [pid for _gid, _path, pid, _camid in gallery_rows]
     gallery_camids = [camid for _gid, _path, _pid, camid in gallery_rows]
-    gallery_embedding_db_path = (output_dir.parent / "embedding_db" / "gallery_embeddings.sqlite").resolve().as_posix()
-    query_embedding_db_path = (output_dir.parent / "embedding_db" / "query_embeddings.sqlite").resolve().as_posix()
-    gallery_description_db_path = (
-        output_dir.parent / _DEFAULT_DESCRIPTION_DB_DIRNAME / "gallery_descriptions.sqlite"
-    ).resolve().as_posix()
-    query_description_db_path = (
-        output_dir.parent / _DEFAULT_DESCRIPTION_DB_DIRNAME / "query_descriptions.sqlite"
-    ).resolve().as_posix()
+    gallery_embedding_db_path = to_repo_posix(
+        output_dir.parent / "embedding_db" / "gallery_embeddings.sqlite", repo_root=repo_root
+    )
+    query_embedding_db_path = to_repo_posix(
+        output_dir.parent / "embedding_db" / "query_embeddings.sqlite", repo_root=repo_root
+    )
+    gallery_description_db_path = to_repo_posix(
+        output_dir.parent / _DEFAULT_DESCRIPTION_DB_DIRNAME / "gallery_descriptions.sqlite",
+        repo_root=repo_root,
+    )
+    query_description_db_path = to_repo_posix(
+        output_dir.parent / _DEFAULT_DESCRIPTION_DB_DIRNAME / "query_descriptions.sqlite",
+        repo_root=repo_root,
+    )
 
     rows = []
     for qid, _path, qpid, qcamid in query_rows:
         rows.append(
             {
                 "query_id": qid,
-                "query_image_path": (out_query_dir / qid).resolve().as_posix(),
+                "query_image_path": to_repo_posix(out_query_dir / qid, repo_root=repo_root),
                 "query_embedding_db_path": query_embedding_db_path,
                 "query_description_db_path": query_description_db_path,
                 "gallery_embedding_db_path": gallery_embedding_db_path,
