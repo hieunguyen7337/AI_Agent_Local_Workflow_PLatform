@@ -119,8 +119,9 @@ def test_graphspec_accepts_python_tool_node():
                     "kind": "python_tool",
                     "callable_path": "backend.tools.reid_specialists.weighted_reciprocal_rank_fusion",
                     "inputs": {
-                        "llm_attribute_ranked": "llm_attribute_ranked",
                         "reid_multimodal_embedding_ranked": "reid_multimodal_embedding_ranked",
+                        "description_semantic_ranked": "description_semantic_ranked",
+                        "description_facets_ranked": "description_facets_ranked",
                     },
                     "output_state_key": "ranked_gallery_ids",
                 }
@@ -131,8 +132,9 @@ def test_graphspec_accepts_python_tool_node():
     assert node.kind == "python_tool"
     assert node.callable_path == "backend.tools.reid_specialists.weighted_reciprocal_rank_fusion"
     assert node.inputs == {
-        "llm_attribute_ranked": "llm_attribute_ranked",
         "reid_multimodal_embedding_ranked": "reid_multimodal_embedding_ranked",
+        "description_semantic_ranked": "description_semantic_ranked",
+        "description_facets_ranked": "description_facets_ranked",
     }
     assert node.output_state_key == "ranked_gallery_ids"
 
@@ -272,96 +274,209 @@ def test_resolve_callable_rejects_non_importable():
 
 
 # ---------------------------------------------------------------------------
-# ReID attribute and embedding retriever functions
+# ReID description and embedding retriever functions
 # ---------------------------------------------------------------------------
 
-def _make_gallery_db(path: Path) -> Path:
+import json as _json
+
+
+def _make_gallery_description_db(path: Path) -> Path:
+    """Build a small gallery DB with description rows and a `gallery_descriptions` view.
+
+    Tokens are precomputed deterministically per row so scoring is stable.
+    """
+    rows = [
+        # gallery_id, pid, camid, description, facets, tokens
+        (
+            "g1.jpg", 1, 1,
+            "man in blue jacket and black pants with a backpack",
+            {
+                "upper_body": "blue jacket long sleeve",
+                "lower_body": "black pants long",
+                "shoes": "white sneakers",
+                "head_hair": "short hair no hat",
+                "carried_items": ["backpack"],
+                "gender_presentation": "male",
+                "age_presentation": "young adult",
+            },
+            {
+                "upper_body": {"colors": ["blue"], "garments": ["jacket"], "sleeves": ["long sleeve"], "patterns": []},
+                "lower_body": {"colors": ["black"], "garments": ["pants"], "lengths": ["long"], "patterns": []},
+                "shoes": {"colors": ["white"], "styles": ["sneakers"]},
+                "head_hair": {"hair": ["short"], "headwear": []},
+                "carried_items": ["backpack"],
+                "distinctive_marks": [],
+                "gender_presentation": "male",
+                "age_presentation": "young adult",
+            },
+        ),
+        (
+            "g2.jpg", 2, 2,
+            "woman in red dress with a handbag",
+            {
+                "upper_body": "red dress short sleeve",
+                "lower_body": "red dress long",
+                "shoes": "black heels",
+                "head_hair": "long hair no hat",
+                "carried_items": ["handbag"],
+                "gender_presentation": "female",
+                "age_presentation": "adult",
+            },
+            {
+                "upper_body": {"colors": ["red"], "garments": ["dress"], "sleeves": ["short sleeve"], "patterns": []},
+                "lower_body": {"colors": ["red"], "garments": [], "lengths": ["long"], "patterns": []},
+                "shoes": {"colors": ["black"], "styles": ["heels"]},
+                "head_hair": {"hair": ["long"], "headwear": []},
+                "carried_items": ["handbag"],
+                "distinctive_marks": [],
+                "gender_presentation": "female",
+                "age_presentation": "adult",
+            },
+        ),
+        (
+            "g3.jpg", 3, 3,
+            "man in blue jacket and black jeans with a backpack",
+            {
+                "upper_body": "blue jacket long sleeve",
+                "lower_body": "black jeans long",
+                "shoes": "black sneakers",
+                "head_hair": "short hair no hat",
+                "carried_items": ["backpack"],
+                "gender_presentation": "male",
+                "age_presentation": "adult",
+            },
+            {
+                "upper_body": {"colors": ["blue"], "garments": ["jacket"], "sleeves": ["long sleeve"], "patterns": []},
+                "lower_body": {"colors": ["black"], "garments": ["jeans"], "lengths": ["long"], "patterns": []},
+                "shoes": {"colors": ["black"], "styles": ["sneakers"]},
+                "head_hair": {"hair": ["short"], "headwear": []},
+                "carried_items": ["backpack"],
+                "distinctive_marks": [],
+                "gender_presentation": "male",
+                "age_presentation": "adult",
+            },
+        ),
+    ]
     with sqlite3.connect(path) as con:
         con.execute(
             """
-            CREATE TABLE gallery_attributes (
-                gallery_id TEXT PRIMARY KEY,
+            CREATE TABLE image_descriptions (
+                image_id TEXT PRIMARY KEY,
                 image_path TEXT NOT NULL,
                 pid INTEGER NOT NULL,
                 camid INTEGER NOT NULL,
-                attributes_json TEXT NOT NULL,
-                gender TEXT NOT NULL,
-                hair TEXT NOT NULL,
-                clothing_type TEXT NOT NULL,
-                upper_body_clothes TEXT NOT NULL,
-                lower_body_clothes TEXT NOT NULL,
-                hat TEXT NOT NULL,
-                backpack TEXT NOT NULL,
-                bag TEXT NOT NULL,
-                handbag TEXT NOT NULL
+                description TEXT NOT NULL,
+                description_json TEXT NOT NULL,
+                facets_json TEXT NOT NULL,
+                tokens_json TEXT NOT NULL
             )
             """
         )
         con.executemany(
             """
-            INSERT INTO gallery_attributes (
-                gallery_id, image_path, pid, camid, attributes_json,
-                gender, hair, clothing_type, upper_body_clothes,
-                lower_body_clothes, hat, backpack, bag, handbag
+            INSERT INTO image_descriptions (
+                image_id, image_path, pid, camid,
+                description, description_json, facets_json, tokens_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                ("g1.jpg", "/gallery/g1.jpg", 1, 1, "{}", "male", "short", "pants", "short sleeve", "long", "no", "yes", "no", "no"),
-                ("g2.jpg", "/gallery/g2.jpg", 2, 2, "{}", "female", "long", "dress", "short sleeve", "long", "no", "no", "yes", "no"),
-                ("g3.jpg", "/gallery/g3.jpg", 3, 3, "{}", "male", "short", "pants", "short sleeve", "long", "no", "yes", "no", "no"),
+                (
+                    gid, f"/gallery/{gid}", pid, camid,
+                    description,
+                    _json.dumps({"description": description, "facets": facets}, sort_keys=True),
+                    _json.dumps(facets, sort_keys=True),
+                    _json.dumps(tokens, sort_keys=True),
+                )
+                for gid, pid, camid, description, facets, tokens in rows
             ],
+        )
+        con.execute(
+            """
+            CREATE VIEW gallery_descriptions AS
+            SELECT image_id AS gallery_id, image_path, pid, camid,
+                   description, description_json, facets_json, tokens_json
+            FROM image_descriptions
+            """
         )
     return path
 
 
-def _make_query_db(path: Path) -> Path:
+def _make_query_description_db(path: Path) -> Path:
+    facets = {
+        "upper_body": "blue jacket long sleeve",
+        "lower_body": "black pants long",
+        "shoes": "white sneakers",
+        "head_hair": "short hair no hat",
+        "carried_items": ["backpack"],
+        "gender_presentation": "male",
+        "age_presentation": "young adult",
+        "pose_view": "front",
+        "distinctive_marks": [],
+        "uncertainties": [],
+    }
+    tokens = {
+        "upper_body": {"colors": ["blue"], "garments": ["jacket"], "sleeves": ["long sleeve"], "patterns": []},
+        "lower_body": {"colors": ["black"], "garments": ["pants"], "lengths": ["long"], "patterns": []},
+        "shoes": {"colors": ["white"], "styles": ["sneakers"]},
+        "head_hair": {"hair": ["short"], "headwear": []},
+        "carried_items": ["backpack"],
+        "distinctive_marks": [],
+        "gender_presentation": "male",
+        "age_presentation": "young adult",
+    }
+    description_record = {
+        "description": "young man in blue jacket, black pants, white sneakers, with a backpack",
+        "facets": facets,
+    }
     with sqlite3.connect(path) as con:
         con.execute(
             """
-            CREATE TABLE image_attributes (
+            CREATE TABLE image_descriptions (
                 image_id TEXT PRIMARY KEY,
                 image_path TEXT NOT NULL,
                 pid INTEGER NOT NULL,
                 camid INTEGER NOT NULL,
-                attributes_json TEXT NOT NULL,
-                gender TEXT NOT NULL,
-                hair TEXT NOT NULL,
-                clothing_type TEXT NOT NULL,
-                upper_body_clothes TEXT NOT NULL,
-                lower_body_clothes TEXT NOT NULL,
-                hat TEXT NOT NULL,
-                backpack TEXT NOT NULL,
-                bag TEXT NOT NULL,
-                handbag TEXT NOT NULL
+                description TEXT NOT NULL,
+                description_json TEXT NOT NULL,
+                facets_json TEXT NOT NULL,
+                tokens_json TEXT NOT NULL
             )
             """
         )
         con.execute(
             """
-            INSERT INTO image_attributes (
-                image_id, image_path, pid, camid, attributes_json,
-                gender, hair, clothing_type, upper_body_clothes,
-                lower_body_clothes, hat, backpack, bag, handbag
+            CREATE TABLE image_embeddings (
+                image_id TEXT PRIMARY KEY,
+                image_path TEXT NOT NULL,
+                pid INTEGER NOT NULL,
+                camid INTEGER NOT NULL,
+                embedding_json TEXT NOT NULL
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO image_descriptions (
+                image_id, image_path, pid, camid,
+                description, description_json, facets_json, tokens_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "q1.jpg",
                 "/query/q1.jpg",
                 1,
                 1,
-                "{}",
-                "male",
-                "short",
-                "pants",
-                "short sleeve",
-                "long",
-                "no",
-                "yes",
-                "no",
-                "no",
+                description_record["description"],
+                _json.dumps(description_record, sort_keys=True),
+                _json.dumps(facets, sort_keys=True),
+                _json.dumps(tokens, sort_keys=True),
             ),
+        )
+        con.execute(
+            "INSERT INTO image_embeddings (image_id, image_path, pid, camid, embedding_json) VALUES (?, ?, ?, ?, ?)",
+            ("q1.jpg", "/query/q1.jpg", 1, 1, "[0.4, 0.5, 0.6]"),
         )
     return path
 
@@ -383,34 +498,103 @@ def _make_query_embedding_db(path: Path) -> Path:
     return path
 
 
-def test_lookup_query_attributes_from_eval_db_reads_query_db(tmp_path: Path):
-    from backend.tools.reid_specialists import lookup_query_attributes_from_eval_db
+def test_lookup_query_description_from_eval_db_reads_query_db(tmp_path: Path):
+    from backend.tools.reid_specialists import lookup_query_description_from_eval_db
 
-    db_path = _make_query_db(tmp_path / "query.sqlite")
-    result = lookup_query_attributes_from_eval_db("q1.jpg", str(db_path))
-    assert result == {
-        "gender": "male",
-        "hair": "short",
-        "clothing_type": "pants",
-        "upper_body_clothes": "short sleeve",
-        "lower_body_clothes": "long",
-        "hat": "no",
-        "backpack": "yes",
-        "bag": "no",
-        "handbag": "no",
+    db_path = _make_query_description_db(tmp_path / "query.sqlite")
+    result = lookup_query_description_from_eval_db("q1.jpg", str(db_path))
+    assert "blue jacket" in result["description"]
+    assert result["facets"]["gender_presentation"] == "male"
+    assert result["facets"]["upper_body"] == "blue jacket long sleeve"
+    assert result["tokens"]["upper_body"]["colors"] == ["blue"]
+    assert result["tokens"]["carried_items"] == ["backpack"]
+
+
+def test_lookup_query_description_embedding_from_eval_db_reads_embedding(tmp_path: Path):
+    from backend.tools.reid_specialists import lookup_query_description_embedding_from_eval_db
+
+    db_path = _make_query_description_db(tmp_path / "query.sqlite")
+    assert lookup_query_description_embedding_from_eval_db("q1.jpg", str(db_path)) == [0.4, 0.5, 0.6]
+
+
+def test_retrieve_gallery_by_description_facets_prefers_matching_facets(tmp_path: Path):
+    from backend.tools.reid_specialists import retrieve_gallery_by_description_facets
+
+    db_path = _make_gallery_description_db(tmp_path / "gallery.sqlite")
+    query_record = {
+        "description": "young man in blue jacket and black pants with a backpack",
+        "facets": {
+            "upper_body": "blue jacket long sleeve",
+            "lower_body": "black pants long",
+            "shoes": "white sneakers",
+            "head_hair": "short hair no hat",
+            "carried_items": ["backpack"],
+            "gender_presentation": "male",
+            "age_presentation": "young adult",
+            "pose_view": "front",
+            "distinctive_marks": [],
+            "uncertainties": [],
+        },
+        "tokens": {
+            "upper_body": {"colors": ["blue"], "garments": ["jacket"], "sleeves": ["long sleeve"], "patterns": []},
+            "lower_body": {"colors": ["black"], "garments": ["pants"], "lengths": ["long"], "patterns": []},
+            "shoes": {"colors": ["white"], "styles": ["sneakers"]},
+            "head_hair": {"hair": ["short"], "headwear": []},
+            "carried_items": ["backpack"],
+            "distinctive_marks": [],
+            "gender_presentation": "male",
+            "age_presentation": "young adult",
+        },
     }
-
-
-def test_retrieve_gallery_by_attribute_similarity_ranks_matching_attributes(tmp_path: Path):
-    from backend.tools.reid_specialists import retrieve_gallery_by_attribute_similarity
-
-    db_path = _make_gallery_db(tmp_path / "gallery.sqlite")
-    result = retrieve_gallery_by_attribute_similarity(
-        query_attributes='{"gender": "male", "hair": "short", "clothing_type": "pants", "upper_body_clothes": "short sleeve", "lower_body_clothes": "long", "hat": "no", "backpack": "yes", "bag": "no", "handbag": "no"}',
-        gallery_db_path=str(db_path),
-        top_k=2,
+    result = retrieve_gallery_by_description_facets(
+        query_description=query_record,
+        gallery_description_db_path=str(db_path),
+        top_k=3,
     )
-    assert result == ["g1.jpg", "g3.jpg"]
+    # g1 matches everything (lower garment "pants" too); g3 matches color/garment/items but not lower garment;
+    # g2 is a heavy mismatch (woman, red dress, handbag).
+    assert result[0] == "g1.jpg"
+    assert result[1] == "g3.jpg"
+    assert result[2] == "g2.jpg"
+
+
+def test_retrieve_gallery_by_description_facets_penalises_color_conflict(tmp_path: Path):
+    from backend.tools.reid_specialists import retrieve_gallery_by_description_facets
+
+    db_path = _make_gallery_description_db(tmp_path / "gallery.sqlite")
+    # Query says "red upper" and "skirt lower". g1/g3 both conflict (blue upper); g2 partially matches red upper.
+    query_record = {
+        "description": "woman in red dress",
+        "facets": {
+            "upper_body": "red dress short sleeve",
+            "lower_body": "red skirt long",
+            "shoes": "black heels",
+            "head_hair": "long hair",
+            "carried_items": ["handbag"],
+            "gender_presentation": "female",
+            "age_presentation": "adult",
+            "pose_view": "front",
+            "distinctive_marks": [],
+            "uncertainties": [],
+        },
+        "tokens": {
+            "upper_body": {"colors": ["red"], "garments": ["dress"], "sleeves": ["short sleeve"], "patterns": []},
+            "lower_body": {"colors": ["red"], "garments": ["skirt"], "lengths": ["long"], "patterns": []},
+            "shoes": {"colors": ["black"], "styles": ["heels"]},
+            "head_hair": {"hair": ["long"], "headwear": []},
+            "carried_items": ["handbag"],
+            "distinctive_marks": [],
+            "gender_presentation": "female",
+            "age_presentation": "adult",
+        },
+    }
+    result = retrieve_gallery_by_description_facets(
+        query_description=query_record,
+        gallery_description_db_path=str(db_path),
+        top_k=3,
+    )
+    # g2 should be ranked first (matches color, garment, items, gender)
+    assert result[0] == "g2.jpg"
 
 
 def test_lookup_query_reid_embedding_from_eval_db_reads_query_db(tmp_path: Path):
@@ -420,35 +604,128 @@ def test_lookup_query_reid_embedding_from_eval_db_reads_query_db(tmp_path: Path)
     assert lookup_query_reid_embedding_from_eval_db("q1.jpg", str(db_path)) == [0.1, 0.2, 0.3]
 
 
-def test_weighted_reciprocal_rank_fusion_uses_default_embedding_heavy_weights():
+def test_weighted_reciprocal_rank_fusion_uses_visual_heavy_defaults():
     from backend.tools.reid_specialists import weighted_reciprocal_rank_fusion
 
-    # No explicit weights — defaults to emb=0.9 / attr=0.1
+    # Defaults: visual=0.80 / desc_semantic=0.13 / desc_facets=0.07
     result = weighted_reciprocal_rank_fusion(
-        llm_attribute_ranked=["b", "d"],
         reid_multimodal_embedding_ranked=["c", "a"],
+        description_semantic_ranked=["b", "d"],
+        description_facets_ranked=["d", "e"],
     )
     assert result[:2] == ["c", "a"]
+
+
+def test_weighted_reciprocal_rank_fusion_supports_three_channels():
+    from backend.tools.reid_specialists import weighted_reciprocal_rank_fusion
+
+    result = weighted_reciprocal_rank_fusion(
+        reid_multimodal_embedding_ranked=["x"],
+        description_semantic_ranked=["y"],
+        description_facets_ranked=["z"],
+    )
+    assert set(result[:3]) == {"x", "y", "z"}
 
 
 def test_weighted_reciprocal_rank_fusion_respects_explicit_weights():
     from backend.tools.reid_specialists import weighted_reciprocal_rank_fusion
 
-    # Attribute-heavy weights flip the order
+    # Description-heavy weights flip the order toward description channels.
     result = weighted_reciprocal_rank_fusion(
-        llm_attribute_ranked=["b", "d"],
         reid_multimodal_embedding_ranked=["c", "a"],
-        fusion_weight_analysis='{"rrf_weights": {"llm_attribute": 0.9, "reid_multimodal_embedding": 0.1}}',
+        description_semantic_ranked=["b", "d"],
+        description_facets_ranked=["b", "d"],
+        fusion_weight_analysis='{"rrf_weights": {"reid_multimodal_embedding": 0.05, "description_semantic": 0.50, "description_facets": 0.45}}',
     )
     assert result[:2] == ["b", "d"]
 
 
-def test_workflow_state_declares_ranked_gallery_ids():
+def test_weighted_reciprocal_rank_fusion_zero_weight_drops_channel():
+    from backend.tools.reid_specialists import weighted_reciprocal_rank_fusion
+
+    result = weighted_reciprocal_rank_fusion(
+        reid_multimodal_embedding_ranked=["a"],
+        description_semantic_ranked=["b"],
+        description_facets_ranked=["c"],
+        fusion_weight_analysis='{"rrf_weights": {"reid_multimodal_embedding": 1.0, "description_semantic": 0.0, "description_facets": 0.0}}',
+    )
+    assert result == ["a"]
+
+
+def test_decide_reid_fusion_weights_switches_when_description_agrees_and_visual_misses():
+    from backend.tools.reid_specialists import decide_reid_fusion_weights
+
+    result = decide_reid_fusion_weights(
+        reid_multimodal_embedding_ranked=["v1", "v2", "v3"],
+        description_semantic_ranked=["d1", "x", "y"],
+        description_facets_ranked=["d1", "z", "w"],
+    )
+    assert result["decision"] == "description_heavy"
+    assert result["rrf_weights"]["description_semantic"] > result["rrf_weights"]["reid_multimodal_embedding"]
+    assert result["top_description_candidate"] == "d1"
+
+
+def test_decide_reid_fusion_weights_keeps_default_when_visual_agrees():
+    from backend.tools.reid_specialists import decide_reid_fusion_weights
+
+    result = decide_reid_fusion_weights(
+        reid_multimodal_embedding_ranked=["d1", "v2", "v3"],
+        description_semantic_ranked=["d1", "x", "y"],
+        description_facets_ranked=["d1", "z", "w"],
+    )
+    assert result["decision"] == "visual_heavy_default"
+    assert result["rrf_weights"]["reid_multimodal_embedding"] == 0.80
+
+
+def test_lookup_precomputed_retrieval_ranking_reads_channel_rows(tmp_path: Path):
+    from backend.tools.reid_specialists import lookup_precomputed_retrieval_ranking
+
+    db_path = tmp_path / "retrieval_scores.sqlite"
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE retrieval_rankings (
+                query_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                gallery_id TEXT NOT NULL,
+                score REAL NOT NULL,
+                PRIMARY KEY (query_id, channel, rank)
+            )
+            """
+        )
+        con.executemany(
+            "INSERT INTO retrieval_rankings VALUES (?, ?, ?, ?, ?)",
+            [
+                ("q1.jpg", "visual_image_embedding", 2, "g2.jpg", 0.8),
+                ("q1.jpg", "visual_image_embedding", 1, "g1.jpg", 0.9),
+                ("q1.jpg", "description_semantic_text", 1, "d1.jpg", 0.7),
+            ],
+        )
+
+    assert lookup_precomputed_retrieval_ranking(
+        query_id="q1.jpg",
+        retrieval_score_db_path=str(db_path),
+        channel="visual_image_embedding",
+        top_k=2,
+    ) == ["g1.jpg", "g2.jpg"]
+
+
+def test_workflow_state_declares_description_keys():
     from backend.runtime.state import WorkflowState
 
     assert "ranked_gallery_ids" in WorkflowState.__annotations__
-    assert "aliased_reciprocal_rank_fused_ranking" not in WorkflowState.__annotations__
-    assert "ranked_gallery_pids_raw" not in WorkflowState.__annotations__
+    assert "query_llm_description" in WorkflowState.__annotations__
+    assert "query_description_embedding" in WorkflowState.__annotations__
+    assert "description_facets_ranked" in WorkflowState.__annotations__
+    assert "description_semantic_ranked" in WorkflowState.__annotations__
+    assert "fusion_weight_analysis" in WorkflowState.__annotations__
+    assert "query_description_db_path" in WorkflowState.__annotations__
+    assert "gallery_description_db_path" in WorkflowState.__annotations__
+    assert "retrieval_score_db_path" in WorkflowState.__annotations__
+    assert "retrieval_score_top_k" in WorkflowState.__annotations__
+    assert "query_llm_attributes" not in WorkflowState.__annotations__
+    assert "llm_attribute_ranked" not in WorkflowState.__annotations__
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +739,8 @@ def test_person_reid_workflow_spec_loads():
     spec = load_graph_spec("person_reid_market1501")
     assert spec.name == "person_reid_market1501"
     node_kinds = {n.id: n.kind for n in spec.nodes}
+    assert "llm_attribute_parser" not in node_kinds
+    assert "llm_attribute_retriever" not in node_kinds
     assert "fusion_weight_analyser" not in node_kinds
     assert "alias_gallery_ids_for_ranker" not in node_kinds
     assert "final_ranker" not in node_kinds
@@ -469,27 +748,54 @@ def test_person_reid_workflow_spec_loads():
     assert "boss_orchestrator" not in node_kinds
     assert "rrf_precompute" not in node_kinds
     assert node_kinds["start"] == "python_tool"
-    assert node_kinds["llm_attribute_parser"] == "llm"
-    assert node_kinds["llm_attribute_retriever"] == "python_tool"
+    assert node_kinds["llm_description_parser"] == "llm"
+    assert node_kinds["description_facets_retriever"] == "python_tool"
     assert node_kinds["reid_multimodal_embedding"] == "embedding"
     assert node_kinds["reid_multimodal_embedding_retriever"] == "vector_retriever"
+    assert node_kinds["description_semantic_embedding"] == "embedding"
+    assert node_kinds["description_semantic_retriever"] == "vector_retriever"
+    assert node_kinds["adaptive_fusion_weight_router"] == "python_tool"
     assert node_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
     for node in spec.nodes:
         if node.kind == "python_tool":
             assert node.name.strip()
             assert node.description.strip()
-    attribute = next(n for n in spec.nodes if n.id == "llm_attribute_parser")
+    description = next(n for n in spec.nodes if n.id == "llm_description_parser")
+    facets_retriever = next(n for n in spec.nodes if n.id == "description_facets_retriever")
     embedding = next(n for n in spec.nodes if n.id == "reid_multimodal_embedding")
+    desc_embedding = next(n for n in spec.nodes if n.id == "description_semantic_embedding")
+    desc_semantic = next(n for n in spec.nodes if n.id == "description_semantic_retriever")
+    visual_retriever = next(n for n in spec.nodes if n.id == "reid_multimodal_embedding_retriever")
+    router = next(n for n in spec.nodes if n.id == "adaptive_fusion_weight_router")
     rrf = next(n for n in spec.nodes if n.id == "weighted_reciprocal_rank_fusion")
-    assert attribute.model == "qwen/qwen3.5-9b"
+    assert description.model == "google/gemma-4-31b-it"
     assert embedding.model == "google/gemini-embedding-2-preview"
-    assert attribute.image_inputs[0].state_key == "query_image_path"
+    assert desc_embedding.model == "google/gemini-embedding-2-preview"
+    assert desc_embedding.input_state_key == "query_llm_description"
+    assert visual_retriever.top_k == 200
+    assert desc_semantic.index_path == "{gallery_description_db_path}"
+    assert desc_semantic.query_embedding_state_key == "query_description_embedding"
+    assert desc_semantic.top_k == 200
+    assert router.callable_path == "backend.tools.reid_specialists.decide_reid_fusion_weights"
+    assert set((router.inputs or {}).keys()) == {
+        "reid_multimodal_embedding_ranked",
+        "description_semantic_ranked",
+        "description_facets_ranked",
+    }
+    assert description.image_inputs[0].state_key == "query_image_path"
     assert embedding.input_template == ""
-    assert "Label the main pedestrian in this image." in attribute.user_prompt_template
-    assert "upper_body_clothes_color" not in attribute.user_prompt_template
-    assert '"age"' not in attribute.user_prompt_template
+    assert "Describe ONLY the visible person" in description.user_prompt_template
+    assert "background" in description.user_prompt_template
+    assert facets_retriever.callable_path == "backend.tools.reid_specialists.retrieve_gallery_by_description_facets"
+    assert facets_retriever.inputs.get("query_description") == "query_llm_description"
+    assert facets_retriever.inputs.get("gallery_description_db_path") == "gallery_description_db_path"
     assert rrf.output_state_key == "ranked_gallery_ids"
-    assert "fusion_weight_analysis" not in (rrf.inputs or {})
+    assert set((rrf.inputs or {}).keys()) == {
+        "reid_multimodal_embedding_ranked",
+        "description_semantic_ranked",
+        "description_facets_ranked",
+        "fusion_weight_analysis",
+    }
 
 
 def test_person_reid_eval_workflow_spec_loads():
@@ -497,6 +803,8 @@ def test_person_reid_eval_workflow_spec_loads():
 
     spec = load_graph_spec("person_reid_market1501_eval")
     node_kinds = {n.id: n.kind for n in spec.nodes}
+    assert "llm_attribute_lookup" not in node_kinds
+    assert "llm_attribute_retriever" not in node_kinds
     assert "fusion_weight_analyser" not in node_kinds
     assert "alias_gallery_ids_for_ranker" not in node_kinds
     assert "final_ranker" not in node_kinds
@@ -504,21 +812,37 @@ def test_person_reid_eval_workflow_spec_loads():
     assert "boss_orchestrator" not in node_kinds
     assert "rrf_precompute" not in node_kinds
     assert node_kinds["start"] == "python_tool"
-    assert node_kinds["llm_attribute_lookup"] == "python_tool"
     assert node_kinds["multimodal_embedding_lookup"] == "python_tool"
-    assert node_kinds["reid_multimodal_embedding_retriever"] == "vector_retriever"
+    assert "reid_multimodal_embedding_retriever" not in node_kinds
+    assert node_kinds["description_embedding_lookup"] == "python_tool"
+    assert node_kinds["description_lookup"] == "python_tool"
+    assert "description_semantic_retriever" not in node_kinds
+    assert "description_facets_retriever" not in node_kinds
+    assert node_kinds["adaptive_fusion_weight_router"] == "python_tool"
     assert node_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
     for node in spec.nodes:
         if node.kind == "python_tool":
             assert node.name.strip()
             assert node.description.strip()
-    attribute = next(n for n in spec.nodes if n.id == "llm_attribute_lookup")
-    embedding = next(n for n in spec.nodes if n.id == "multimodal_embedding_lookup")
+    visual_lookup = next(n for n in spec.nodes if n.id == "multimodal_embedding_lookup")
+    desc_lookup = next(n for n in spec.nodes if n.id == "description_lookup")
+    desc_embedding_lookup = next(n for n in spec.nodes if n.id == "description_embedding_lookup")
+    router = next(n for n in spec.nodes if n.id == "adaptive_fusion_weight_router")
     rrf = next(n for n in spec.nodes if n.id == "weighted_reciprocal_rank_fusion")
-    assert attribute.callable_path == "backend.tools.reid_specialists.lookup_query_attributes_from_eval_db"
-    assert embedding.callable_path == "backend.tools.reid_specialists.lookup_query_reid_embedding_from_eval_db"
+    assert visual_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
+    assert visual_lookup.inputs["channel"] == "channel_visual_image_embedding"
+    assert desc_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
+    assert desc_lookup.inputs["channel"] == "channel_description_structured_facets"
+    assert desc_embedding_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
+    assert desc_embedding_lookup.inputs["channel"] == "channel_description_semantic_text"
+    assert router.callable_path == "backend.tools.reid_specialists.decide_reid_fusion_weights"
     assert rrf.output_state_key == "ranked_gallery_ids"
-    assert "fusion_weight_analysis" not in (rrf.inputs or {})
+    assert set((rrf.inputs or {}).keys()) == {
+        "reid_multimodal_embedding_ranked",
+        "description_semantic_ranked",
+        "description_facets_ranked",
+        "fusion_weight_analysis",
+    }
 
 
 def test_person_reid_llm_prompts_with_literal_json_format_cleanly():
@@ -531,10 +855,9 @@ def test_person_reid_llm_prompts_with_literal_json_format_cleanly():
     state = _SafeDict(
         user_input="query.jpg",
         query_image_path="/tmp/query.jpg",
-        query_llm_attributes={"gender": "male"},
+        query_llm_description={"description": "a person"},
     )
 
-    # Only the main workflow still has LLM nodes (attribute parser); eval is all python_tool
     spec = load_graph_spec("person_reid_market1501")
     for node in spec.nodes:
         if node.kind == "llm":

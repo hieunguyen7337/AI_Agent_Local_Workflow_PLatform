@@ -1,4 +1,4 @@
-"""Build a 100-query / 500-gallery Market-1501 eval partition."""
+"""Build a Market-1501 eval partition (default 1000 queries / 5000 gallery images)."""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +10,8 @@ from pathlib import Path
 import yaml
 
 _FILENAME_RE = re.compile(r"^(\d+)_c(\d+)s\d+_\d+_\d+\.jpg$")
-_DEFAULT_OUTPUT = Path(__file__).parent / "partition_100q_500g"
+_DEFAULT_OUTPUT = Path(__file__).parent / "partition_1000q_5000g"
+_DEFAULT_DESCRIPTION_DB_DIRNAME = "description_db_google_gemma_4_31b_it"
 
 
 def _parse_image(filename: str) -> tuple[int, int] | None:
@@ -38,10 +39,10 @@ def build_partition(
     *,
     market1501_root: Path,
     output_dir: Path = _DEFAULT_OUTPUT,
-    n_queries: int = 100,
-    gallery_size: int = 500,
+    n_queries: int = 1000,
+    gallery_size: int = 5000,
     seed: int = 42,
-    retrieval_top_k: int = 20,
+    retrieval_top_k: int = 200,
 ) -> Path:
     query_dir = market1501_root / "query"
     gallery_dir = market1501_root / "bounding_box_test"
@@ -73,8 +74,9 @@ def build_partition(
         selected_positive = rng.choice(positives_by_query[qid])
         selected_gallery[selected_positive[0]] = selected_positive
 
-    selected_pids = {qpid for _qid, _qpath, qpid, _qcamid in selected_queries}
-    filler = [item for item in gallery if item[0] not in selected_gallery and item[2] not in selected_pids]
+    # Any image not yet chosen may be used as filler (including other views of query
+    # identities). Excluding entire query PIDs exhausts the pool for large n_queries.
+    filler = [item for item in gallery if item[0] not in selected_gallery]
     rng.shuffle(filler)
     needed = gallery_size - len(selected_gallery)
     if len(filler) < needed:
@@ -100,10 +102,14 @@ def build_partition(
     gallery_ids = [gid for gid, _path, _pid, _camid in gallery_rows]
     gallery_pids = [pid for _gid, _path, pid, _camid in gallery_rows]
     gallery_camids = [camid for _gid, _path, _pid, camid in gallery_rows]
-    gallery_db_path = (output_dir.parent / "attribute_db" / "gallery_attributes.sqlite").resolve().as_posix()
-    query_db_path = (output_dir.parent / "attribute_db" / "query_attributes.sqlite").resolve().as_posix()
     gallery_embedding_db_path = (output_dir.parent / "embedding_db" / "gallery_embeddings.sqlite").resolve().as_posix()
     query_embedding_db_path = (output_dir.parent / "embedding_db" / "query_embeddings.sqlite").resolve().as_posix()
+    gallery_description_db_path = (
+        output_dir.parent / _DEFAULT_DESCRIPTION_DB_DIRNAME / "gallery_descriptions.sqlite"
+    ).resolve().as_posix()
+    query_description_db_path = (
+        output_dir.parent / _DEFAULT_DESCRIPTION_DB_DIRNAME / "query_descriptions.sqlite"
+    ).resolve().as_posix()
 
     rows = []
     for qid, _path, qpid, qcamid in query_rows:
@@ -111,10 +117,10 @@ def build_partition(
             {
                 "query_id": qid,
                 "query_image_path": (out_query_dir / qid).resolve().as_posix(),
-                "query_db_path": query_db_path,
                 "query_embedding_db_path": query_embedding_db_path,
-                "gallery_db_path": gallery_db_path,
+                "query_description_db_path": query_description_db_path,
                 "gallery_embedding_db_path": gallery_embedding_db_path,
+                "gallery_description_db_path": gallery_description_db_path,
                 "retrieval_top_k": retrieval_top_k,
                 "query_pid": qpid,
                 "query_camid": qcamid,
@@ -131,10 +137,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build partitioned Market-1501 eval dataset")
     parser.add_argument("--market1501-root", required=True, type=Path)
     parser.add_argument("--output-dir", type=Path, default=_DEFAULT_OUTPUT)
-    parser.add_argument("--n-queries", type=int, default=100)
-    parser.add_argument("--gallery-size", type=int, default=500)
+    parser.add_argument("--n-queries", type=int, default=1000)
+    parser.add_argument("--gallery-size", type=int, default=5000)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--retrieval-top-k", type=int, default=20)
+    parser.add_argument("--retrieval-top-k", type=int, default=200)
     args = parser.parse_args()
 
     output = build_partition(

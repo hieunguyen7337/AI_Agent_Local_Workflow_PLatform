@@ -6,7 +6,7 @@ import math
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from opentelemetry.trace import Status, StatusCode
 
@@ -15,6 +15,12 @@ from backend.runtime.audit import AuditRecorder, audit_preview
 from backend.runtime.state import WorkflowState
 from backend.telemetry.genai_attrs import WORKFLOW_LATENCY_MS, WORKFLOW_STATUS, node_attrs
 from backend.telemetry.tracer import get_tracer
+
+
+class _IndexRow(NamedTuple):
+    id: str
+    embedding: tuple[float, ...]
+    text: str | None
 
 
 def make_vector_retriever_node(
@@ -38,14 +44,12 @@ def make_vector_retriever_node(
         with tracer.start_as_current_span(f"node.{cfg.id}", attributes=attrs) as span:
             t0 = time.monotonic_ns()
             try:
-                rows = _load_index(_format_template(cfg.index_path, state))
-                scored = [
-                    (_cosine_similarity(query_embedding, row["embedding"]), row)
-                    for row in rows
-                ]
-                scored.sort(key=lambda item: (-item[0], item[1]["id"]))
-                top = [row for _score, row in scored[: cfg.top_k]]
-                ids = [row["id"] for row in top]
+                top = _search_index(
+                    _format_template(cfg.index_path, state),
+                    query_embedding=query_embedding,
+                    top_k=cfg.top_k,
+                )
+                ids = [row.id for row in top]
                 output = _format_context(top)
                 latency_ms = (time.monotonic_ns() - t0) / 1_000_000
                 span.set_attribute(WORKFLOW_LATENCY_MS, latency_ms)
@@ -89,13 +93,14 @@ def _format_template(template: str, state: WorkflowState) -> str:
     return template.format_map(_SafeDict(state))
 
 
-def _load_index(index_path: str) -> list[dict[str, Any]]:
+def _search_index(index_path: str, *, query_embedding: list[float], top_k: int) -> list[_IndexRow]:
     path = Path(index_path)
     if not path.is_absolute():
         path = Path.cwd() / path
     if not path.is_file():
         raise FileNotFoundError(f"vector index not found: {index_path}")
 
+    scored: list[tuple[float, str, str | None]] = []
     with sqlite3.connect(path) as con:
         for query in (
             "SELECT id, embedding_json, text FROM embeddings ORDER BY id",
@@ -103,10 +108,15 @@ def _load_index(index_path: str) -> list[dict[str, Any]]:
             "SELECT image_id AS id, embedding_json, NULL AS text FROM image_embeddings ORDER BY image_id",
         ):
             try:
-                rows = con.execute(query).fetchall()
+                cursor = con.execute(query)
+                for row_id, embedding_json, text in cursor:
+                    row_id = str(row_id)
+                    score = _cosine_similarity(query_embedding, _parse_embedding(embedding_json))
+                    scored.append((score, row_id, text))
+                scored.sort(key=lambda item: (-item[0], item[1]))
                 return [
-                    {"id": str(row[0]), "embedding": _parse_embedding(row[1]), "text": row[2]}
-                    for row in rows
+                    _IndexRow(row_id, (), text)
+                    for _score, row_id, text in scored[: int(top_k)]
                 ]
             except sqlite3.OperationalError:
                 continue
@@ -124,7 +134,7 @@ def _parse_embedding(value: Any) -> list[float]:
     return [float(x) for x in value]
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
+def _cosine_similarity(a: list[float] | tuple[float, ...], b: list[float] | tuple[float, ...]) -> float:
     if len(a) != len(b):
         raise ValueError(f"embedding dimension mismatch: query={len(a)} index={len(b)}")
     dot = sum(x * y for x, y in zip(a, b))
@@ -135,12 +145,12 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (mag_a * mag_b)
 
 
-def _format_context(rows: list[dict[str, Any]]) -> list[str] | str:
+def _format_context(rows: list[_IndexRow]) -> list[str] | str:
     if not rows:
         return []
-    if any(row.get("text") for row in rows):
+    if any(row.text for row in rows):
         return "\n\n".join(
-            f"[{row['id']}] {str(row.get('text') or '').strip()}"
+            f"[{row.id}] {str(row.text or '').strip()}"
             for row in rows
         )
-    return [row["id"] for row in rows]
+    return [row.id for row in rows]

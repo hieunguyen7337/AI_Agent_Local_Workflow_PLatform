@@ -290,6 +290,50 @@ def test_map_cmc_json_string_input():
     assert result["actual"]["cmc_1"] == 1
 
 
+def test_map_cmc_helpers_match_compute_map_cmc():
+    """Filtered pairs + per-k helper must agree with ``_compute_map_cmc`` CMC bits."""
+    from backend.evals.dataset import (
+        _compute_map_cmc,
+        map_cmc_filtered_ranked_pairs,
+        map_cmc_hit_relevant_within_k,
+    )
+
+    row = _row()
+    gallery_ids = row["gallery_ids"]
+    gallery_pids = row["gallery_pids"]
+    gallery_camids = row["gallery_camids"]
+    query_pid = row["query_pid"]
+    query_camid = row["query_camid"]
+    ranked_lists = (
+        ["g0", "g1", "g3", "g4", "g5", "g6", "g7", "g2"],
+        ["g3", "g4", "g5", "g6", "g1", "g2", "g7"],
+        ["g3", "g4", "g5", "g6", "g7"],
+        ["g0", "g3", "g4", "g5", "g1"],
+    )
+    ks = [1, 5, 10, 20]
+    for ranked in ranked_lists:
+        scored = _compute_map_cmc(
+            ranked,
+            gallery_ids=gallery_ids,
+            gallery_pids=gallery_pids,
+            gallery_camids=gallery_camids,
+            query_pid=query_pid,
+            query_camid=query_camid,
+            cmc_ks=ks,
+        )
+        _, filt = map_cmc_filtered_ranked_pairs(
+            ranked,
+            gallery_ids=gallery_ids,
+            gallery_pids=gallery_pids,
+            gallery_camids=gallery_camids,
+            query_pid=query_pid,
+            query_camid=query_camid,
+        )
+        for k in ks:
+            hit = map_cmc_hit_relevant_within_k(filt, query_pid=query_pid, k=k)
+            assert int(scored[f"cmc_{k}"]) == int(hit)
+
+
 def test_map_cmc_via_dataset_eval(monkeypatch, tmp_path: Path):
     eval_dir = tmp_path / "evals" / "reid"
     eval_dir.mkdir(parents=True)
@@ -425,6 +469,10 @@ def test_market1501_partition_builder_writes_100_query_500_gallery_layout(tmp_pa
     assert len(rows[0]["gallery_camids"]) == 500
     assert rows[0]["query_embedding_db_path"].endswith("query_embeddings.sqlite")
     assert rows[0]["gallery_embedding_db_path"].endswith("gallery_embeddings.sqlite")
+    assert rows[0]["query_description_db_path"].endswith("query_descriptions.sqlite")
+    assert rows[0]["gallery_description_db_path"].endswith("gallery_descriptions.sqlite")
+    assert "query_db_path" not in rows[0]
+    assert "gallery_db_path" not in rows[0]
     for row in rows:
         assert any(
             pid == row["query_pid"] and camid != row["query_camid"]
@@ -514,39 +562,6 @@ def test_market1501_gallery_db_builder_requires_key_for_live_build(monkeypatch, 
         raise AssertionError("expected missing OPENROUTER_API_KEY to fail")
 
 
-def test_attribute_dbs_builder_builds_query_and_gallery_dbs(tmp_path: Path):
-    from evals.person_reid_market1501.build_attribute_dbs import DEFAULT_MODEL, build_attribute_dbs
-
-    partition = tmp_path / "partition"
-    query_dir = partition / "query"
-    gallery_dir = partition / "bounding_box_test"
-    query_dir.mkdir(parents=True)
-    gallery_dir.mkdir(parents=True)
-    (query_dir / "0001_c1s1_000001_00.jpg").write_bytes(b"query")
-    (gallery_dir / "0001_c2s1_000001_00.jpg").write_bytes(b"gallery")
-    (gallery_dir / "-1_c1s1_000401_03.jpg").write_bytes(b"junk")
-
-    def _extractor(path: Path) -> dict[str, str]:
-        return _reid_attrs()
-
-    outputs = build_attribute_dbs(
-        partition_root=partition,
-        output_dir=tmp_path / "attribute_db",
-        max_concurrency=2,
-        model=DEFAULT_MODEL,
-        attribute_extractor=_extractor,
-    )
-
-    assert outputs["query"].name == "query_attributes.sqlite"
-    assert outputs["gallery"].name == "gallery_attributes.sqlite"
-    with sqlite3.connect(outputs["query"]) as con:
-        query_rows = con.execute("SELECT image_id, gender FROM image_attributes").fetchall()
-    with sqlite3.connect(outputs["gallery"]) as con:
-        gallery_rows = con.execute("SELECT image_id, gender FROM image_attributes").fetchall()
-    assert query_rows == [("0001_c1s1_000001_00.jpg", "male")]
-    assert gallery_rows == [("0001_c2s1_000001_00.jpg", "male")]
-
-
 def test_embedding_dbs_builder_builds_query_and_gallery_dbs(tmp_path: Path):
     from evals.person_reid_market1501.build_embedding_dbs import DEFAULT_MODEL, build_embedding_dbs
 
@@ -580,8 +595,90 @@ def test_embedding_dbs_builder_builds_query_and_gallery_dbs(tmp_path: Path):
     assert gallery_rows == [("0001_c2s1_000001_00.jpg", "[1.0, 0.0]")]
 
 
-def test_attribute_db_builder_default_model_and_requires_key(monkeypatch, tmp_path: Path):
-    from evals.person_reid_market1501 import build_attribute_dbs as module
+def _stub_description_record() -> dict:
+    return {
+        "description": "person in casual clothes",
+        "facets": {
+            "upper_body": "blue jacket long sleeve",
+            "lower_body": "black pants long",
+            "shoes": "white sneakers",
+            "head_hair": "short hair",
+            "carried_items": ["backpack"],
+            "gender_presentation": "male",
+            "age_presentation": "young adult",
+            "pose_view": "front",
+            "distinctive_marks": [],
+            "uncertainties": [],
+        },
+    }
+
+
+def test_description_dbs_builder_builds_query_and_gallery_dbs(tmp_path: Path):
+    from evals.person_reid_market1501.build_description_dbs import (
+        DEFAULT_DESCRIPTION_MODEL,
+        DEFAULT_EMBEDDING_MODEL,
+        build_description_dbs,
+    )
+
+    partition = tmp_path / "partition"
+    query_dir = partition / "query"
+    gallery_dir = partition / "bounding_box_test"
+    query_dir.mkdir(parents=True)
+    gallery_dir.mkdir(parents=True)
+    (query_dir / "0001_c1s1_000001_00.jpg").write_bytes(b"query")
+    (gallery_dir / "0001_c2s1_000001_00.jpg").write_bytes(b"gallery")
+    (gallery_dir / "-1_c1s1_000401_03.jpg").write_bytes(b"junk")
+
+    def _description_extractor(path: Path) -> dict:
+        return _stub_description_record()
+
+    def _embedding_extractor(text: str) -> list[float]:
+        return [1.0, 0.0] if "casual" in text else [0.0, 1.0]
+
+    outputs = build_description_dbs(
+        partition_root=partition,
+        output_dir=tmp_path / "description_db",
+        max_concurrency=2,
+        description_model=DEFAULT_DESCRIPTION_MODEL,
+        embedding_model=DEFAULT_EMBEDDING_MODEL,
+        description_extractor=_description_extractor,
+        embedding_extractor=_embedding_extractor,
+    )
+
+    assert outputs["query"].name == "query_descriptions.sqlite"
+    assert outputs["gallery"].name == "gallery_descriptions.sqlite"
+
+    with sqlite3.connect(outputs["query"]) as con:
+        query_rows = con.execute(
+            "SELECT image_id, description, facets_json, tokens_json FROM image_descriptions"
+        ).fetchall()
+        query_emb_rows = con.execute(
+            "SELECT image_id, embedding_json FROM image_embeddings"
+        ).fetchall()
+    assert query_rows[0][0] == "0001_c1s1_000001_00.jpg"
+    assert "casual" in query_rows[0][1]
+    facets = json.loads(query_rows[0][2])
+    tokens = json.loads(query_rows[0][3])
+    assert facets["gender_presentation"] == "male"
+    assert tokens["upper_body"]["colors"] == ["blue"]
+    assert tokens["upper_body"]["garments"] == ["jacket"]
+    assert tokens["lower_body"]["garments"] == ["pants"]
+    assert tokens["carried_items"] == ["backpack"]
+    assert query_emb_rows == [("0001_c1s1_000001_00.jpg", "[1.0, 0.0]")]
+
+    with sqlite3.connect(outputs["gallery"]) as con:
+        gallery_emb_rows = con.execute(
+            "SELECT gallery_id, embedding_json FROM gallery_embeddings"
+        ).fetchall()
+        gallery_desc_rows = con.execute(
+            "SELECT gallery_id, description FROM gallery_descriptions"
+        ).fetchall()
+    assert gallery_emb_rows == [("0001_c2s1_000001_00.jpg", "[1.0, 0.0]")]
+    assert gallery_desc_rows[0][0] == "0001_c2s1_000001_00.jpg"
+
+
+def test_description_db_builder_requires_key_for_live_build(monkeypatch, tmp_path: Path):
+    from evals.person_reid_market1501 import build_description_dbs as module
 
     image_dir = tmp_path / "query"
     image_dir.mkdir()
@@ -591,12 +688,18 @@ def test_attribute_db_builder_default_model_and_requires_key(monkeypatch, tmp_pa
     captured: dict[str, str] = {}
 
     def _should_not_call(**kwargs):
-        captured["model"] = kwargs["model"]
+        captured["model"] = kwargs.get("model")
         raise AssertionError("provider should not be called without key")
 
     monkeypatch.setattr(module, "call_provider", _should_not_call)
+    monkeypatch.setattr(module, "call_embedding_provider", _should_not_call)
+
     try:
-        module.build_attribute_db(image_dir=image_dir, output=tmp_path / "query.sqlite")
+        module.build_description_db(
+            image_dir=image_dir,
+            output=tmp_path / "query.sqlite",
+            is_gallery=False,
+        )
     except RuntimeError as exc:
         assert "OPENROUTER_API_KEY" in str(exc)
     else:
@@ -604,25 +707,40 @@ def test_attribute_db_builder_default_model_and_requires_key(monkeypatch, tmp_pa
     assert captured == {}
 
 
-def test_attribute_db_builder_uses_qwen35_default_model(monkeypatch, tmp_path: Path):
-    from backend.providers.base import LLMResponse, Usage
-    from evals.person_reid_market1501 import build_attribute_dbs as module
+def test_description_db_builder_uses_default_vision_model(monkeypatch, tmp_path: Path):
+    from backend.providers.base import EmbeddingResponse, LLMResponse, Usage
+    from evals.person_reid_market1501 import build_description_dbs as module
 
     image_dir = tmp_path / "query"
     image_dir.mkdir()
     (image_dir / "0001_c1s1_000001_00.jpg").write_bytes(b"query")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     monkeypatch.setattr(module, "load_dotenv", lambda: None)
-    captured: dict[str, str] = {}
+    captured_models: list[str] = []
 
     def _fake_call_provider(_provider: str, **kwargs):
-        captured["model"] = kwargs["model"]
+        captured_models.append(kwargs["model"])
         return LLMResponse(
-            text=json.dumps(_reid_attrs()),
+            text=json.dumps(_stub_description_record()),
             usage=Usage(1, 1),
             model=kwargs["model"],
         )
 
+    def _fake_call_embedding_provider(_provider: str, **kwargs):
+        captured_models.append(kwargs["model"])
+        return EmbeddingResponse(
+            embedding=[0.1, 0.2],
+            usage=Usage(1, 0),
+            model=kwargs["model"],
+        )
+
     monkeypatch.setattr(module, "call_provider", _fake_call_provider)
-    module.build_attribute_db(image_dir=image_dir, output=tmp_path / "query.sqlite", max_concurrency=1)
-    assert captured["model"] == "qwen/qwen3.5-9b"
+    monkeypatch.setattr(module, "call_embedding_provider", _fake_call_embedding_provider)
+    module.build_description_db(
+        image_dir=image_dir,
+        output=tmp_path / "query.sqlite",
+        is_gallery=False,
+        max_concurrency=1,
+    )
+    assert captured_models[0] == "google/gemma-4-31b-it"
+    assert captured_models[1] == "google/gemini-embedding-2-preview"

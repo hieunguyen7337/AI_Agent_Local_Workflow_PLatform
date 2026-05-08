@@ -1,4 +1,4 @@
-dataset_path: partition_1000q_5000g/dataset.yaml
+dataset_path: partition_1000q_5000g/dataset_50rows.yaml
 dataset_format: yaml
 input_mapping:
   user_input: query_id
@@ -17,7 +17,7 @@ input_mapping:
   channel_visual_image_embedding: channel_visual_image_embedding
   channel_description_semantic_text: channel_description_semantic_text
   channel_description_structured_facets: channel_description_structured_facets
-max_concurrency: 2
+max_concurrency: 25
 scorers:
 - id: market1501_map_cmc
   type: map_cmc

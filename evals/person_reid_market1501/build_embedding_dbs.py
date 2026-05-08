@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend.providers import call_embedding_provider
 
 _FILENAME_RE = re.compile(r"^(\d+)_c(\d+)s\d+_\d+_\d+\.jpg$")
-_DEFAULT_PARTITION = Path(__file__).parent / "partition_100q_500g"
+_DEFAULT_PARTITION = Path(__file__).parent / "partition_1000q_5000g"
 _DEFAULT_OUTPUT_DIR = Path(__file__).parent / "embedding_db"
 DEFAULT_MODEL = "google/gemini-embedding-2-preview"
 

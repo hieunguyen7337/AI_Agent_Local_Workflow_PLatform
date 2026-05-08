@@ -1,10 +1,14 @@
 schema_version: workflow.graph/v1
 name: person_reid_market1501_eval
 description: >-
-  Eval-friendly person re-identification pipeline for a 100-query / 500-gallery
-  Market-1501 partition. Attribute and query embedding representations are
-  loaded from offline DBs; fusion uses hardcoded embedding-heavy weights
-  (emb=0.9 / attr=0.1) derived from per-branch ablation on the eval set.
+  Eval-friendly person re-identification pipeline for a 1000-query / 5000-gallery
+  Market-1501 partition. It has three explicitly named retrieval paths, each
+  represented by one query-side python_tool lookup against the Gemma retrieval
+  score DB. Path 1, eval_visual_image_embedding, reads a precomputed visual
+  top-200 ranking. Path 2, eval_description_semantic_text, reads a precomputed
+  description-text embedding top-200 ranking. Path 3,
+  eval_description_structured_facets, reads a precomputed structured-facet
+  top-200 ranking. Adaptive RRF fusion combines all three.
 category: agentic
 tags:
   - person-reid
@@ -26,66 +30,100 @@ nodes:
       user_input: user_input
     output_state_key: start_marker
 
-  - id: llm_attribute_lookup
-    kind: python_tool
-    name: Lookup query attributes from eval DB
-    description: Reads precomputed query pedestrian attributes from the offline eval query attribute database.
-    callable_path: backend.tools.reid_specialists.lookup_query_attributes_from_eval_db
-    inputs:
-      query_id: user_input
-      query_db_path: query_db_path
-    output_state_key: query_llm_attributes
-
-  - id: llm_attribute_retriever
-    kind: python_tool
-    name: Retrieve gallery by attribute similarity
-    description: Performs local SQLite retrieval by comparing query attributes against the offline gallery attribute database.
-    callable_path: backend.tools.reid_specialists.retrieve_gallery_by_attribute_similarity
-    inputs:
-      query_attributes: query_llm_attributes
-      gallery_db_path: gallery_db_path
-      top_k: retrieval_top_k
-    output_state_key: llm_attribute_ranked
-
   - id: multimodal_embedding_lookup
     kind: python_tool
-    name: Lookup query ReID embedding from eval DB
-    description: Reads the precomputed query ReID multimodal embedding from the offline eval embedding database.
-    callable_path: backend.tools.reid_specialists.lookup_query_reid_embedding_from_eval_db
+    name: Path 1 - eval_visual_image_embedding precomputed ranking lookup
+    description: >-
+      Single query-side python node for the visual path. Reads top-200 gallery
+      IDs for channel visual_image_embedding from the Gemma retrieval score DB.
+      Example: query_id "0004_c3s3_065619_00.jpg" returns gallery IDs ranked by
+      query-image embedding vs gallery-image embedding cosine score.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
     inputs:
       query_id: user_input
-      query_embedding_db_path: query_embedding_db_path
-    output_state_key: query_multimodal_embedding
-
-  - id: reid_multimodal_embedding_retriever
-    kind: vector_retriever
-    index_path: "{gallery_embedding_db_path}"
-    query_embedding_state_key: query_multimodal_embedding
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_visual_image_embedding
+      top_k: retrieval_score_top_k
     output_state_key: reid_multimodal_embedding_ranked
-    top_k: 20
+
+  - id: description_embedding_lookup
+    kind: python_tool
+    name: Path 2 - eval_description_semantic_text precomputed ranking lookup
+    description: >-
+      Single query-side python node for the semantic text path. Reads top-200
+      gallery IDs for channel description_semantic_text from the Gemma retrieval
+      score DB. Example: "white short-sleeved t-shirt and dark shorts" returns
+      gallery IDs ranked by query-description embedding vs gallery-description
+      embedding cosine score.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_description_semantic_text
+      top_k: retrieval_score_top_k
+    output_state_key: description_semantic_ranked
+
+  - id: description_lookup
+    kind: python_tool
+    name: Path 3 - eval_description_structured_facets precomputed ranking lookup
+    description: >-
+      Single query-side python node for the structured facet path. Reads top-200
+      gallery IDs for channel description_structured_facets from the Gemma
+      retrieval score DB. Example: "red short-sleeved t-shirt, black shorts,
+      backpack" returns gallery IDs ranked by region-aware facet score.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_description_structured_facets
+      top_k: retrieval_score_top_k
+    output_state_key: description_facets_ranked
+
+  - id: adaptive_fusion_weight_router
+    kind: python_tool
+    name: Decide adaptive ReID fusion weights
+    description: >-
+      Detects strong agreement between eval_description_semantic_text and
+      eval_description_structured_facets. If their shared top candidate is weak
+      or absent in eval_visual_image_embedding, it emits description-heavy
+      weights; otherwise it keeps visual-heavy defaults.
+    callable_path: backend.tools.reid_specialists.decide_reid_fusion_weights
+    inputs:
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+    output_state_key: fusion_weight_analysis
 
   - id: weighted_reciprocal_rank_fusion
     kind: python_tool
-    name: Weighted reciprocal rank fusion
-    description: Fuses attribute and ReID embedding candidate rankings using embedding-heavy RRF weights (emb=0.9 / attr=0.1).
+    name: Fuse eval_visual_image_embedding + eval_description_semantic_text + eval_description_structured_facets
+    description: >-
+      Combines the three precomputed path rankings with weighted reciprocal-rank
+      fusion. The adaptive router can reverse emphasis toward the two
+      description paths when semantic and facet paths agree but the visual path
+      disagrees.
     callable_path: backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
     inputs:
-      llm_attribute_ranked: llm_attribute_ranked
       reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+      fusion_weight_analysis: fusion_weight_analysis
     output_state_key: ranked_gallery_ids
 
 edges:
   - from: start
-    to: llm_attribute_lookup
-  - from: start
     to: multimodal_embedding_lookup
-  - from: llm_attribute_lookup
-    to: llm_attribute_retriever
+  - from: start
+    to: description_embedding_lookup
+  - from: start
+    to: description_lookup
   - from: multimodal_embedding_lookup
-    to: reid_multimodal_embedding_retriever
-  - from: llm_attribute_retriever
-    to: weighted_reciprocal_rank_fusion
-  - from: reid_multimodal_embedding_retriever
+    to: adaptive_fusion_weight_router
+  - from: description_embedding_lookup
+    to: adaptive_fusion_weight_router
+  - from: description_lookup
+    to: adaptive_fusion_weight_router
+  - from: adaptive_fusion_weight_router
     to: weighted_reciprocal_rank_fusion
   - from: weighted_reciprocal_rank_fusion
     to: __end__

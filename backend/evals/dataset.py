@@ -352,6 +352,66 @@ def _parse_ranked_ids(value: Any) -> list[str]:
     return []
 
 
+def map_cmc_filtered_ranked_pairs(
+    ranked_ids: list[str],
+    *,
+    gallery_ids: list[str],
+    gallery_pids: list[int],
+    gallery_camids: list[int],
+    query_pid: int,
+    query_camid: int,
+) -> tuple[int, list[tuple[str, int]]]:
+    """Build the junk-filtered ranking used by ``map_cmc`` / ``_compute_map_cmc``.
+
+    Returns ``(total_relevant, filtered_pairs)`` where ``total_relevant`` counts
+    gallery items with ``pid == query_pid`` and ``camid != query_camid``, and
+    ``filtered_pairs`` is ``(gallery_id, pid)`` in retrieval order after the
+    same junk rules as the scorer (unknown id dropped, same pid+query cam
+    dropped, background pids dropped).
+
+    Pair this with :func:`map_cmc_hit_relevant_within_k` for per-``k`` CMC-style
+    hits without duplicating filter logic.
+    """
+    qpid = int(query_pid)
+    qcam = int(query_camid)
+    lookup: dict[str, tuple[int, int]] = {
+        str(gid): (int(pid), int(camid))
+        for gid, pid, camid in zip(gallery_ids, gallery_pids, gallery_camids)
+    }
+    total_relevant = sum(
+        1 for pid, camid in zip(gallery_pids, gallery_camids)
+        if int(pid) == qpid and int(camid) != qcam
+    )
+    filtered: list[tuple[str, int]] = []
+    for gid in ranked_ids:
+        entry = lookup.get(str(gid))
+        if entry is None:
+            continue
+        pid, camid = entry
+        if pid == qpid and camid == qcam:
+            continue
+        if pid in {-1, 0}:
+            continue
+        filtered.append((gid, pid))
+    return total_relevant, filtered
+
+
+def map_cmc_hit_relevant_within_k(
+    filtered_pairs: list[tuple[str, int]],
+    *,
+    query_pid: int,
+    k: int,
+) -> bool:
+    """Whether a ``pid == query_pid`` item appears in the first ``k`` filtered slots (CMC@k style)."""
+    qpid = int(query_pid)
+    for rank_idx, (_gid, pid) in enumerate(filtered_pairs, start=1):
+        if rank_idx > k:
+            break
+        if pid == qpid:
+            return True
+    return False
+
+
 def _compute_map_cmc(
     ranked_ids: list[str],
     *,
@@ -362,27 +422,14 @@ def _compute_map_cmc(
     query_camid: int,
     cmc_ks: list[int],
 ) -> dict[str, Any]:
-    lookup: dict[str, tuple[int, int]] = {
-        str(gid): (int(pid), int(camid))
-        for gid, pid, camid in zip(gallery_ids, gallery_pids, gallery_camids)
-    }
-    # Relevant = same pid, different cam, not background junk
-    total_relevant = sum(
-        1 for pid, camid in zip(gallery_pids, gallery_camids)
-        if int(pid) == query_pid and int(camid) != query_camid
+    total_relevant, filtered = map_cmc_filtered_ranked_pairs(
+        ranked_ids,
+        gallery_ids=gallery_ids,
+        gallery_pids=gallery_pids,
+        gallery_camids=gallery_camids,
+        query_pid=query_pid,
+        query_camid=query_camid,
     )
-    # Filter ranked list: remove same-cam-same-pid junk and background (pid -1/0)
-    filtered: list[tuple[str, int]] = []
-    for gid in ranked_ids:
-        entry = lookup.get(str(gid))
-        if entry is None:
-            continue
-        pid, camid = entry
-        if pid == query_pid and camid == query_camid:
-            continue
-        if pid in {-1, 0}:
-            continue
-        filtered.append((gid, pid))
 
     if total_relevant == 0:
         return {"ap": 0.0, **{f"cmc_{k}": 0 for k in cmc_ks}}

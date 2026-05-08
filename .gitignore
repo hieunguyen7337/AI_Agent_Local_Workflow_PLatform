@@ -22,7 +22,8 @@ evals/person_reid_market1501/gallery_index/
 evals/person_reid_market1501/gallery_db/
 evals/person_reid_market1501/attribute_db/
 evals/person_reid_market1501/embedding_db/
-evals/person_reid_market1501/partition_100q_500g/
+evals/person_reid_market1501/description_db/
+evals/person_reid_market1501/partition_1000q_5000g/
 dataset/
 ss_R0_R5_workflow/
 .codex_logs/

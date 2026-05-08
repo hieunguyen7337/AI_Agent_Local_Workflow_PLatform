@@ -1,10 +1,14 @@
 schema_version: workflow.graph/v1
 name: person_reid_market1501
 description: >-
-  Person re-identification pipeline with explicit attribute and multimodal
-  embedding branches over offline gallery databases. Fusion uses embedding-heavy
-  RRF weights (emb=0.9 / attr=0.1) derived from per-branch ablation on
-  Market-1501 eval data.
+  Person re-identification pipeline with three named retrieval paths over local
+  gallery databases. Path 1, visual_image_embedding, embeds the query image and
+  retrieves visually similar gallery images. Path 2, description_semantic_text,
+  writes a person-only description, embeds that description, and retrieves
+  gallery descriptions with similar wording. Path 3, description_structured_facets,
+  uses the same description's clothing/accessory tokens for region-aware facet
+  matching. Each path emits a top-200 ranked gallery list into the same adaptive
+  RRF fusion contract used by the eval workflow.
 category: agentic
 tags:
   - person-reid
@@ -25,52 +29,64 @@ nodes:
       user_input: user_input
     output_state_key: start_marker
 
-  - id: llm_attribute_parser
+  - id: llm_description_parser
     kind: llm
     provider: openrouter
-    model: qwen/qwen3.5-9b
+    model: google/gemma-4-31b-it
+    name: Generate query person description
     system_prompt: >-
-      You label visible pedestrian attributes for person re-identification.
-      Return only the requested raw JSON object.
+      You write strict person-only descriptions for person re-identification.
+      Return raw JSON only and never describe the background or other people.
     user_prompt_template: |-
-      Label the main pedestrian in this image.
-      If multiple people are visible, focus on the most prominent (largest/most central) person.
-      If a body region is occluded or cropped, infer from whatever is visible.
+      Describe ONLY the visible person in this image.
+      Ignore the background, scene, camera angle, image quality, shadows, weather, and any other people.
+      Focus strictly on the main pedestrian: garments, accessories, hair, and visible body presentation.
+      Do not invent details that aren't visible. If a body region is occluded, cropped, or unclear, write "unclear".
 
-      Return only a raw JSON object with these exact keys and text values:
+      Return only a raw JSON object with these exact keys:
 
       {{
-        "gender":               "male" | "female",
-        "hair":                 "short" | "long",
-        "clothing_type":        "dress" | "pants" | "shorts" | "skirt",
-        "upper_body_clothes":   "long sleeve" | "short sleeve",
-        "lower_body_clothes":   "long" | "short",
-        "hat":                  "no" | "yes",
-        "backpack":             "no" | "yes",
-        "bag":                  "no" | "yes",
-        "handbag":              "no" | "yes"
+        "description":          "<one concise person-only caption, 1-2 sentences>",
+        "facets": {{
+          "upper_body":           "<color + garment type + sleeve length, or 'unclear'>",
+          "lower_body":           "<color + garment type + length, or 'unclear'>",
+          "shoes":                "<color + style, or 'unclear'>",
+          "head_hair":            "<hair length/style + headwear, or 'unclear'>",
+          "carried_items":        ["<each visible item: backpack | handbag | shoulder bag | tote | plastic bag | box | umbrella | phone | briefcase | none>"],
+          "gender_presentation":  "male | female | unclear",
+          "age_presentation":     "child | young adult | adult | older adult | unclear",
+          "pose_view":            "front | back | left | right | unclear",
+          "distinctive_marks":    ["<each short specific visible cue, e.g. 'red logo on chest'>"],
+          "uncertainties":        ["<each region that is occluded/cropped/blurred>"]
+        }}
       }}
 
       No markdown, no explanation - raw JSON only.
-    output_state_key: query_llm_attributes
+    output_state_key: query_llm_description
     image_inputs:
       - state_key: query_image_path
         detail: auto
     temperature: 0.0
 
-  - id: llm_attribute_retriever
+  - id: description_facets_retriever
     kind: python_tool
-    name: Retrieve gallery by attribute similarity
-    description: Performs local SQLite retrieval by comparing query LLM attributes against the offline gallery attribute database.
-    callable_path: backend.tools.reid_specialists.retrieve_gallery_by_attribute_similarity
+    name: Path 3 - description_structured_facets
+    description: >-
+      Scores top-200 gallery descriptions against the generated query description using
+      structured tokens such as upper-body color, lower garment, shoes, bags,
+      caps, and distinctive marks. Example: a query description with "red
+      short-sleeved t-shirt, black shorts, black backpack" should rank gallery
+      rows with the same red/black/backpack facets above generic red-shirt rows.
+    callable_path: backend.tools.reid_specialists.retrieve_gallery_by_description_facets
     inputs:
-      query_attributes: query_llm_attributes
-      gallery_db_path: gallery_db_path
+      query_description: query_llm_description
+      gallery_description_db_path: gallery_description_db_path
       top_k: retrieval_top_k
-    output_state_key: llm_attribute_ranked
+    output_state_key: description_facets_ranked
 
   - id: reid_multimodal_embedding
     kind: embedding
+    name: Path 1 - visual_image_embedding query encoder
     provider: openrouter
     model: google/gemini-embedding-2-preview
     input_template: ""
@@ -81,33 +97,92 @@ nodes:
 
   - id: reid_multimodal_embedding_retriever
     kind: vector_retriever
+    name: Path 1 - visual_image_embedding gallery retrieval
+    description: >-
+      Retrieves gallery images by cosine similarity between the query image
+      embedding and offline gallery image embeddings. Example: visually similar
+      crops should rank together even when no text description has been used.
     index_path: "{gallery_embedding_db_path}"
     query_embedding_state_key: query_multimodal_embedding
     output_state_key: reid_multimodal_embedding_ranked
-    top_k: 20
+    top_k: 200
+
+  - id: description_semantic_embedding
+    kind: embedding
+    name: Path 2 - description_semantic_text query encoder
+    description: >-
+      Embeds the generated natural-language person description. Example:
+      "white short-sleeved t-shirt and dark shorts" becomes a text vector used
+      to retrieve gallery descriptions with similar wording.
+    provider: openrouter
+    model: google/gemini-embedding-2-preview
+    input_state_key: query_llm_description
+    output_state_key: query_description_embedding
+
+  - id: description_semantic_retriever
+    kind: vector_retriever
+    name: Path 2 - description_semantic_text gallery retrieval
+    description: >-
+      Retrieves top-200 gallery rows by text-embedding similarity over offline
+      person-only gallery descriptions. Example: a query saying "purple shirt,
+      grey trousers, white cap" should retrieve gallery descriptions with the
+      same phrase even across camera viewpoints.
+    index_path: "{gallery_description_db_path}"
+    query_embedding_state_key: query_description_embedding
+    output_state_key: description_semantic_ranked
+    top_k: 200
+
+  - id: adaptive_fusion_weight_router
+    kind: python_tool
+    name: Decide adaptive ReID fusion weights
+    description: >-
+      Compares the three path rankings. If description_semantic_text and
+      description_structured_facets agree on the same top candidate while
+      visual_image_embedding does not, it emits description-heavy RRF weights;
+      otherwise it keeps visual-heavy defaults.
+    callable_path: backend.tools.reid_specialists.decide_reid_fusion_weights
+    inputs:
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+    output_state_key: fusion_weight_analysis
 
   - id: weighted_reciprocal_rank_fusion
     kind: python_tool
-    name: Weighted reciprocal rank fusion
-    description: Fuses attribute and ReID embedding candidate rankings using embedding-heavy RRF weights (emb=0.9 / attr=0.1).
+    name: Fuse visual_image_embedding + description_semantic_text + description_structured_facets
+    description: >-
+      Combines the same three ranked-list inputs as the eval workflow with
+      weighted reciprocal-rank fusion. The adaptive router can reverse emphasis
+      toward the two description paths when semantic and facet paths agree but
+      the visual path disagrees.
     callable_path: backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
     inputs:
-      llm_attribute_ranked: llm_attribute_ranked
       reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+      fusion_weight_analysis: fusion_weight_analysis
     output_state_key: ranked_gallery_ids
 
 edges:
   - from: start
-    to: llm_attribute_parser
+    to: llm_description_parser
   - from: start
     to: reid_multimodal_embedding
-  - from: llm_attribute_parser
-    to: llm_attribute_retriever
+  - from: llm_description_parser
+    to: description_facets_retriever
+  - from: llm_description_parser
+    to: description_semantic_embedding
   - from: reid_multimodal_embedding
     to: reid_multimodal_embedding_retriever
-  - from: llm_attribute_retriever
-    to: weighted_reciprocal_rank_fusion
+  - from: description_semantic_embedding
+    to: description_semantic_retriever
   - from: reid_multimodal_embedding_retriever
+    to: adaptive_fusion_weight_router
+  - from: description_semantic_retriever
+    to: adaptive_fusion_weight_router
+  - from: description_facets_retriever
+    to: adaptive_fusion_weight_router
+  - from: adaptive_fusion_weight_router
     to: weighted_reciprocal_rank_fusion
   - from: weighted_reciprocal_rank_fusion
     to: __end__
