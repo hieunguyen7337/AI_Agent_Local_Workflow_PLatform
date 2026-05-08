@@ -49,10 +49,7 @@ class WorkflowState(TypedDict, total=False):
     gallery_ids: list[str]
     gallery_pids: list[int]
     gallery_camids: list[int]
-    query_llm_attributes: dict[str, Any] | str
     query_multimodal_embedding: list[float]
-    llm_attribute_ranked: list[str]
-    multimodal_embedding_ranked: list[str]
     reid_multimodal_embedding_ranked: list[str]
     rrf_merged_ranking: list[str]
     reciprocal_rank_fused_ranking: list[str]
@@ -64,6 +61,47 @@ class WorkflowState(TypedDict, total=False):
     latency_ms_accum: float
     artifacts: dict[str, Any]
     messages: list[dict]
+
+    # Coding-agent / Claude-style YAML workflows (claude_code_*)
+    runtime_config: dict[str, Any]
+    assembled_context: str
+    compacted_context: str
+    agent_model_response: str
+    agent_route: str
+    agent_should_stop: bool
+    tool_request: dict[str, Any]
+    permission_route: str
+    permission_decision: dict[str, Any] | str
+    tool_result_history: list[Any]
+    tool_result: dict[str, Any]
+    tool_result_digest: str
+    hook_pre_result: dict[str, Any]
+    hook_post_result: dict[str, Any]
+    context_pressure_exceeded: bool
+    subagent_requested: bool
+    subagent_tasks: list[Any]
+    subagent_child_inputs: list[Any]
+    subagent_child_runs: list[Any]
+    subagent_joined: list[Any]
+    subagent_results: list[Any]
+    agent_messages: list[dict[str, Any]]
+    task_plan: str
+    tool_approval_decision: str
+    memory_write_result: dict[str, Any]
+
+    # Person-reID Market-1501 workflows + dataset eval input_mapping
+    query_llm_description: str
+    description_facets_ranked: list[str]
+    description_semantic_ranked: list[str]
+    query_description_embedding: list[float]
+    fusion_weight_analysis: dict[str, Any]
+    query_description_db_path: str
+    gallery_description_db_path: str
+    retrieval_score_db_path: str
+    retrieval_score_top_k: int
+    channel_visual_image_embedding: str
+    channel_description_semantic_text: str
+    channel_description_structured_facets: str
 
 
 def new_state(user_input: str) -> WorkflowState:

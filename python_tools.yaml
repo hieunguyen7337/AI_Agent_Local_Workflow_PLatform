@@ -1,6 +1,10 @@
 allowed_callables:
-  - backend.tools.reid_specialists.mark_workflow_start
-  - backend.tools.reid_specialists.lookup_query_attributes_from_eval_db
+  - backend.tools.agent_workflow.tool_history_digest
+  - backend.tools.reid_specialists.decide_reid_fusion_weights
+  - backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+  - backend.tools.reid_specialists.lookup_query_description_embedding_from_eval_db
+  - backend.tools.reid_specialists.lookup_query_description_from_eval_db
   - backend.tools.reid_specialists.lookup_query_reid_embedding_from_eval_db
-  - backend.tools.reid_specialists.retrieve_gallery_by_attribute_similarity
+  - backend.tools.reid_specialists.mark_workflow_start
+  - backend.tools.reid_specialists.retrieve_gallery_by_description_facets
   - backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
