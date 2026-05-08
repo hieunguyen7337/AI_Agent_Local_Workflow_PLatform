@@ -373,7 +373,9 @@ def make_tool_executor_node(
         request = normalize_tool_request(state.get(cfg.tool_request_state_key, {}))
         attrs = node_attrs(run_id=run_id, graph_name=graph_name, node_id=cfg.id, node_kind=cfg.kind)
         with tracer.start_as_current_span(f"node.{cfg.id}", attributes=attrs) as span:
-            allowed_tools = [tool.id for tool in cfg.tools] if cfg.tools else cfg.allowed_tools
+            allowed_tools = [tool.id for tool in cfg.tools] if cfg.tools else list(cfg.allowed_tools)
+            if not allowed_tools:
+                allowed_tools = list(TOOLS.keys())
             result = execute_tool(request, run_dir=run_dir, allowed_tools=allowed_tools)
             history = [*list(state.get(cfg.history_state_key, [])), result]
             pressure = len(json.dumps(history, ensure_ascii=False)) > cfg.compaction_threshold_chars
