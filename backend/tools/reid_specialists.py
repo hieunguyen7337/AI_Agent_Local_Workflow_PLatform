@@ -13,6 +13,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from backend.repo_root import resolve_dataset_path_str
+
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 _RRF_K = 60
 
@@ -117,12 +119,16 @@ def _query_description_record(value: Any) -> dict[str, Any]:
     }
 
 
+def _resolve_tool_db_path(path_str: str) -> Path:
+    return Path(resolve_dataset_path_str(path_str))
+
+
 def lookup_query_description_from_eval_db(
     query_id: str,
     query_description_db_path: str,
 ) -> dict[str, Any]:
     """Load the precomputed query description record from the offline DB."""
-    db_path = Path(query_description_db_path)
+    db_path = _resolve_tool_db_path(query_description_db_path)
     if not db_path.is_file():
         raise FileNotFoundError(f"query description database not found: {query_description_db_path}")
 
@@ -153,7 +159,7 @@ def lookup_query_description_embedding_from_eval_db(
     query_description_db_path: str,
 ) -> list[float]:
     """Load the precomputed text embedding of the query description."""
-    db_path = Path(query_description_db_path)
+    db_path = _resolve_tool_db_path(query_description_db_path)
     if not db_path.is_file():
         raise FileNotFoundError(f"query description database not found: {query_description_db_path}")
     with sqlite3.connect(db_path) as con:
@@ -178,7 +184,7 @@ def lookup_query_reid_embedding_from_eval_db(
     query_embedding_db_path: str,
 ) -> list[float]:
     """Load a precomputed query visual embedding from an offline eval embedding DB."""
-    db_path = Path(query_embedding_db_path)
+    db_path = _resolve_tool_db_path(query_embedding_db_path)
     if not db_path.is_file():
         raise FileNotFoundError(f"query embedding database not found: {query_embedding_db_path}")
     with sqlite3.connect(db_path) as con:
@@ -205,7 +211,7 @@ def lookup_precomputed_retrieval_ranking(
     top_k: int = 200,
 ) -> list[str]:
     """Read a precomputed ranked gallery list for one eval retrieval channel."""
-    db_path = Path(retrieval_score_db_path)
+    db_path = _resolve_tool_db_path(retrieval_score_db_path)
     if not db_path.is_file():
         raise FileNotFoundError(f"retrieval score database not found: {retrieval_score_db_path}")
     with sqlite3.connect(db_path) as con:
@@ -346,7 +352,7 @@ def retrieve_gallery_by_description_facets(
     weights = _coerce_weight_map(facet_weights, DEFAULT_FACET_WEIGHTS)
     penalties = _coerce_weight_map(facet_penalties, DEFAULT_FACET_PENALTIES)
 
-    db_path = Path(gallery_description_db_path)
+    db_path = _resolve_tool_db_path(gallery_description_db_path)
     if not db_path.is_file():
         raise FileNotFoundError(f"gallery description database not found: {gallery_description_db_path}")
 

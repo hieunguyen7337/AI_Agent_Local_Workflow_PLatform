@@ -26,6 +26,8 @@ from pathlib import Path
 
 import yaml
 
+from backend.repo_root import find_repo_root, to_repo_posix
+
 _FILENAME_RE = re.compile(r"^(\d+)_c(\d+)s\d+_\d+_\d+\.jpg$")
 _OUTPUT_PATH = Path(__file__).parent / "dataset.yaml"
 _INDEX_DIR = Path(__file__).parent / "gallery_index"
@@ -147,20 +149,26 @@ def build_dataset(
     gallery_ids = [g[0] for g in all_gallery]
     gallery_pids = [g[1] for g in all_gallery]
     gallery_camids = [g[2] for g in all_gallery]
+    repo_root = find_repo_root()
     resolved_gallery_db_path = gallery_db_path.resolve()
     resolved_query_db_path = query_db_path.resolve()
     resolved_gallery_embedding_db_path = gallery_embedding_db_path.resolve()
     resolved_query_embedding_db_path = query_embedding_db_path.resolve()
 
+    gallery_db_s = to_repo_posix(resolved_gallery_db_path, repo_root=repo_root)
+    query_db_s = to_repo_posix(resolved_query_db_path, repo_root=repo_root)
+    gallery_emb_s = to_repo_posix(resolved_gallery_embedding_db_path, repo_root=repo_root)
+    query_emb_s = to_repo_posix(resolved_query_embedding_db_path, repo_root=repo_root)
+
     rows = []
     for qid, qpid, qcamid in sampled_queries:
         rows.append({
             "query_id": qid,
-            "query_image_path": (query_dir / qid).resolve().as_posix(),
-            "query_db_path": resolved_query_db_path.as_posix(),
-            "query_embedding_db_path": resolved_query_embedding_db_path.as_posix(),
-            "gallery_db_path": resolved_gallery_db_path.as_posix(),
-            "gallery_embedding_db_path": resolved_gallery_embedding_db_path.as_posix(),
+            "query_image_path": to_repo_posix((query_dir / qid).resolve(), repo_root=repo_root),
+            "query_db_path": query_db_s,
+            "query_embedding_db_path": query_emb_s,
+            "gallery_db_path": gallery_db_s,
+            "gallery_embedding_db_path": gallery_emb_s,
             "retrieval_top_k": retrieval_top_k,
             "query_pid": qpid,
             "query_camid": qcamid,

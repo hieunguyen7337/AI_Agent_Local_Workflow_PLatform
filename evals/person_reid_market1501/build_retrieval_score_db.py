@@ -10,6 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from backend.repo_root import resolve_dataset_path_str
 from backend.tools.reid_specialists import DEFAULT_FACET_PENALTIES, DEFAULT_FACET_WEIGHTS, _facet_pair_score
 from evals.person_reid_market1501.run_ablation import (
     _load_gallery_description_tokens,
@@ -30,10 +31,10 @@ def build_retrieval_score_db(*, dataset_path: Path, output: Path, top_k: int = 2
         raise ValueError(f"empty dataset: {dataset_path}")
 
     sample = rows[0]
-    query_visual_db = Path(sample["query_embedding_db_path"])
-    gallery_visual_db = Path(sample["gallery_embedding_db_path"])
-    query_description_db = Path(sample["query_description_db_path"])
-    gallery_description_db = Path(sample["gallery_description_db_path"])
+    query_visual_db = Path(resolve_dataset_path_str(sample["query_embedding_db_path"]))
+    gallery_visual_db = Path(resolve_dataset_path_str(sample["gallery_embedding_db_path"]))
+    query_description_db = Path(resolve_dataset_path_str(sample["query_description_db_path"]))
+    gallery_description_db = Path(resolve_dataset_path_str(sample["gallery_description_db_path"]))
 
     print("Loading offline DBs ...", flush=True)
     query_visual = _load_query_embedding_dict(query_visual_db)

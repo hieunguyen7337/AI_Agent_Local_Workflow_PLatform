@@ -1,4 +1,4 @@
-dataset_path: partition_1000q_5000g/dataset.yaml
+dataset_path: evals/person_reid_market1501/partition_1000q_5000g/dataset.yaml
 dataset_format: yaml
 input_mapping:
   user_input: query_id

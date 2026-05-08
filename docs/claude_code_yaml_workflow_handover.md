@@ -148,15 +148,23 @@ Implemented behavior:
 
 Use the canonical workflow in the UI so you can approve the plan, or use the CI spec only in trusted environments.
 
+From the repository root (use your own clone path):
+
+```bash
+cd <repository-root>
+.venv/bin/python -m backend.cli.main serve --host 127.0.0.1 --port 8000
+```
+
+Or on Windows PowerShell, from the same root:
+
 ```powershell
-cd C:\Users\Admin\Documents\AI_club_projects\AI_Agent_Local_Workflow_PLatform
 .\.venv\Scripts\python -m backend.cli.main serve --host 127.0.0.1 --port 8000
 ```
 
 In another shell:
 
-```powershell
-cd C:\Users\Admin\Documents\AI_club_projects\AI_Agent_Local_Workflow_PLatform\frontend
+```bash
+cd <repository-root>/frontend
 npm run dev
 ```
 

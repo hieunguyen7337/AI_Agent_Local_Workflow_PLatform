@@ -12,7 +12,7 @@
       "Bash(python -m pytest backend/tests -q)",
       "Bash(.\\\\.venv\\\\Scripts\\\\python -m pytest backend\\\\tests\\\\test_dataset_eval.py -q)",
       "Bash(.venv/Scripts/python -m pytest backend/tests/test_dataset_eval.py -q)",
-      "Read(//c/Users/Admin/**)"
+      "Read(./**)"
     ]
   }
 }

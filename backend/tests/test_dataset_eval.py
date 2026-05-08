@@ -389,6 +389,7 @@ def test_map_cmc_via_dataset_eval(monkeypatch, tmp_path: Path):
 
 
 def test_market1501_dataset_builder_uses_gallery_db_and_full_scoring_metadata(tmp_path: Path):
+    from backend.repo_root import resolve_dataset_path_str
     from evals.person_reid_market1501.build_dataset import build_dataset
 
     market_root = tmp_path / "Market-1501"
@@ -423,12 +424,12 @@ def test_market1501_dataset_builder_uses_gallery_db_and_full_scoring_metadata(tm
     )
 
     assert len(rows) == 100
-    assert rows[0]["query_image_path"].endswith(".jpg")
-    assert Path(rows[0]["query_image_path"]).is_absolute()
-    assert rows[0]["query_db_path"] == query_db.resolve().as_posix()
-    assert rows[0]["gallery_db_path"] == gallery_db.resolve().as_posix()
-    assert rows[0]["query_embedding_db_path"] == query_embedding_db.resolve().as_posix()
-    assert rows[0]["gallery_embedding_db_path"] == gallery_embedding_db.resolve().as_posix()
+    assert resolve_dataset_path_str(rows[0]["query_image_path"]).endswith(".jpg")
+    assert Path(resolve_dataset_path_str(rows[0]["query_image_path"])).is_absolute()
+    assert resolve_dataset_path_str(rows[0]["query_db_path"]) == query_db.resolve().as_posix()
+    assert resolve_dataset_path_str(rows[0]["gallery_db_path"]) == gallery_db.resolve().as_posix()
+    assert resolve_dataset_path_str(rows[0]["query_embedding_db_path"]) == query_embedding_db.resolve().as_posix()
+    assert resolve_dataset_path_str(rows[0]["gallery_embedding_db_path"]) == gallery_embedding_db.resolve().as_posix()
     assert rows[0]["retrieval_top_k"] == 25
     assert rows[0]["gallery_ids"] == [item[0] for item in gallery_specs]
     assert rows[0]["gallery_pids"] == [item[1] for item in gallery_specs]
