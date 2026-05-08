@@ -59,4 +59,4 @@ def my_function(arg_name: SomeType, another_arg: AnotherType) -> ReturnType:
 
 ## Reference example
 
-Current `person_reid_market1501` tools are local only: start pass-through, query attribute DB lookup, eval query embedding lookup, LLM attribute gallery retrieval, weighted reciprocal-rank fusion, and final-ranker output parsing. Hosted Gemini embedding calls are represented as `embedding` nodes, and vector search is represented as `vector_retriever` nodes.
+Current `person_reid_market1501` tools are local only: start pass-through, query description DB lookup, query description-embedding lookup, eval query visual-embedding lookup, description-facet gallery scoring, weighted reciprocal-rank fusion (visual + description semantic + description facets), and final-ranker output parsing. Hosted Gemini embedding calls are represented as `embedding` nodes, and vector search is represented as `vector_retriever` nodes.

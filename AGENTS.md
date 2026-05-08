@@ -34,7 +34,7 @@ Do not introduce JSON, Python modules, decorators, or custom DSLs as alternate w
 - Telemetry is concurrency-safe: a single process-wide tracer routes spans by `workflow.run_id` to each run's own `telemetry.db` and `spans.jsonl`.
 - `python_tool` nodes call allowlisted local Python functions; callables must appear in `python_tools.yaml`; `inputs` maps function kwargs to state keys; `output_state_key` captures the return value. See `docs/python_tools.md`.
 - `llm` nodes can declare `image_inputs` that bind local image paths from state and send base64 `image_url` content parts to vision-capable providers at runtime.
-- `person_reid_market1501` workflow demonstrates live boss/final-ranker LLM calls + query-side specialists + per-specialist `python_tool` retrievers over offline attribute DBs; `person_reid_market1501_eval` uses precomputed query attributes for the 100-query/500-gallery partition. Pipeline includes `rrf_precompute` (weighted RRF, attribute weight=10) and `parse_final_ranking` (LLM output parser with regex fallback). Scorer reads `final_state.ranked_gallery_ids`. Eval baseline: mAP=34.5%, CMC@1/5/10=35%.
+- `person_reid_market1501` workflow demonstrates live boss/final-ranker LLM calls + query-side specialists + per-specialist `python_tool` retrievers over offline description DBs (description, facets, tokens, text embeddings); `person_reid_market1501_eval` uses precomputed query descriptions for the 100-query/500-gallery partition. Pipeline includes `rrf_precompute` (weighted RRF, description channels weighted), `parse_final_ranking` (LLM output parser with regex fallback), and `map_cmc`-aligned disagreement analysis in `run_ablation.py` for description-correct/visual-miss counts at K={1,5,10,20}. Scorer reads `final_state.ranked_gallery_ids`. Current published baseline remains mAP=34.5%, CMC@1/5/10=35% on the 100-query/500-gallery eval split.
 
 Read `FUTURE_SCOPE.md` for the current next milestone and deferred work.
 
@@ -67,7 +67,7 @@ Read `FUTURE_SCOPE.md` for the current next milestone and deferred work.
 - `docs/ui_vision_audit.md` - manual UI audit checklist.
 - `docs/workflow_library.md` - workflow naming, category, tag, template, and placeholder conventions.
 - `docs/python_tools.md` - how to register callables in `python_tools.yaml` and author `python_tool` YAML nodes.
-- `evals/person_reid_market1501/` - `dataset_eval.yaml`, `build_partition.py`, `build_attribute_dbs.py`, `build_dataset.py`, `build_gallery_db.py`, and gitignored partition/DB/index artifacts generated from local data.
+- `evals/person_reid_market1501/` - `dataset_eval.yaml`, `build_partition.py`, `build_description_dbs.py`, `run_ablation.py`, `build_dataset.py`, `build_gallery_db.py`, and gitignored partition/DB/index artifacts generated from local data.
 
 ## Common Commands
 
@@ -141,7 +141,7 @@ Run eval:
 
 ## Current Next Step
 
-Check `FUTURE_SCOPE.md`. The next milestone is **real specialist model wrappers for person reID**: replacing the three placeholder `python_tool` specialists in `person_reid_market1501` with real model implementations (TransReID/ViT, CLIP/SigLIP, HMR2.0/SMPLify). Current eval baseline with stubs: mAP=34.5%, CMC@1/5/10=35% (attribute channel weight=10 in RRF). Requires heavyweight model dependency and GPU loading choices. Read `FUTURE_SCOPE.md` and `docs/python_tools.md` before designing.
+Check `FUTURE_SCOPE.md`. The next milestone is **real specialist model wrappers for person reID**: replacing the three placeholder `python_tool` specialists in `person_reid_market1501` with real model implementations (TransReID/ViT, CLIP/SigLIP, HMR2.0/SMPLify). Current eval baseline with stubs: mAP=34.5%, CMC@1/5/10=35% on the 100-query/500-gallery split; description-channel ablations and disagreement counts are tracked separately in `evals/person_reid_market1501/run_ablation.py`. Requires heavyweight model dependency and GPU loading choices. Read `FUTURE_SCOPE.md` and `docs/python_tools.md` before designing.
 
 Implementation guardrails (carry forward):
 
