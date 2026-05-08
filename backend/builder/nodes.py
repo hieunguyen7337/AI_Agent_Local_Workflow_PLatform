@@ -1,9 +1,9 @@
 """Typed node configurations. Pydantic models for validation + replay override support."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class NodeConfig(BaseModel):
@@ -46,6 +46,7 @@ class EmbeddingNodeConfig(NodeConfig):
     provider: Literal["openrouter"] = "openrouter"
     model: str
     input_template: str = ""
+    input_state_key: str | None = None
     image_inputs: list[LLMImageInputConfig] = Field(default_factory=list)
     output_state_key: str = Field(min_length=1)
     dimensions: int | None = Field(default=None, gt=0)
@@ -104,6 +105,8 @@ class GateNodeConfig(NodeConfig):
     verdict_state_key: str = "tester_verdict"
     pass_target: str  # node id
     fail_target: str  # node id
+    termination_conditions: list[Any] = Field(default_factory=list)
+    checkpoint_on_any_termination: bool = False
 
 
 class RouterNodeConfig(NodeConfig):
@@ -167,6 +170,245 @@ class PythonToolNodeConfig(NodeConfig):
                 f"callable_path {v!r} is not in the python_tools.yaml allowlist"
             )
         return v
+
+
+class McpServerEntry(BaseModel):
+    """Single MCP server entry for agent startup checks."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = ""
+    transport: str = ""
+    health_check: str = ""
+
+
+class McpRegistryConfig(BaseModel):
+    """MCP registry block on ``agent_startup`` nodes."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    transports: list[str] = Field(default_factory=list)
+    capability_registration: str = ""
+    context_cost: str = ""
+    health_check: str = ""
+    servers: list[McpServerEntry] = Field(default_factory=list)
+
+
+class AgentMemorySource(BaseModel):
+    """Declarative memory tier for ``agent_context``."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    tier: str = ""
+    store: str = ""
+
+
+class AgentStartupNodeConfig(NodeConfig):
+    kind: Literal["agent_startup"] = "agent_startup"
+    model_config = ConfigDict(extra="ignore")
+
+    output_state_key: str = Field(default="runtime_config", min_length=1)
+    provider_env_vars: list[str] = Field(default_factory=list)
+    policy_config_path: str = ".claude/agent_policy.json"
+    mcp_registry: McpRegistryConfig = Field(default_factory=McpRegistryConfig)
+
+
+class AgentContextNodeConfig(NodeConfig):
+    kind: Literal["agent_context"] = "agent_context"
+    model_config = ConfigDict(extra="ignore")
+
+    runtime_config_state_key: str = "runtime_config"
+    memory_sources: list[AgentMemorySource] = Field(default_factory=list)
+    include_files: list[str] = Field(default_factory=list)
+    output_state_key: str = Field(default="assembled_context", min_length=1)
+    max_file_chars: int = Field(5000, gt=0)
+
+
+class AgentModelNodeConfig(NodeConfig):
+    kind: Literal["agent_model"] = "agent_model"
+    model_config = ConfigDict(extra="ignore")
+
+    provider: Literal["openrouter", "openai"] = "openrouter"
+    model: str
+    system_prompt: str
+    user_prompt_template: str
+    output_state_key: str = Field(default="agent_model_response", min_length=1)
+    temperature: float = 0.2
+    max_tokens: int | None = None
+    max_retries: int = 3
+
+
+class AgentResponseParserNodeConfig(NodeConfig):
+    kind: Literal["agent_response_parser"] = "agent_response_parser"
+    model_config = ConfigDict(extra="ignore")
+
+    input_state_key: str = Field(default="agent_model_response", min_length=1)
+    route_state_key: str = Field(default="agent_route", min_length=1)
+    tool_request_state_key: str = Field(default="tool_request", min_length=1)
+    final_answer_state_key: str = Field(default="final_answer", min_length=1)
+    should_stop_state_key: str = Field(default="agent_should_stop", min_length=1)
+
+
+class PermissionGateNodeConfig(NodeConfig):
+    kind: Literal["permission_gate"] = "permission_gate"
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str = "default"
+    ml_classifier: bool = False
+    policy_stack: list[dict[str, Any]] = Field(default_factory=list)
+    escalate_on: list[str] = Field(default_factory=list)
+    never_restore_on_resume: bool = False
+    tool_request_state_key: str = Field(default="tool_request", min_length=1)
+    route_state_key: str = Field(default="permission_route", min_length=1)
+    decision_state_key: str = Field(default="permission_decision", min_length=1)
+    history_state_key: str = Field(default="tool_result_history", min_length=1)
+    write_scope: str = ""
+
+
+class HookSpec(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = ""
+    command: str = ""
+    timeout_s: float = Field(30.0, gt=0)
+    blocking: bool = True
+    applies_to: list[str] | None = None
+
+
+class HookRunnerNodeConfig(NodeConfig):
+    kind: Literal["hook_runner"] = "hook_runner"
+    model_config = ConfigDict(extra="ignore")
+
+    trigger: str = Field(min_length=1)
+    hooks: list[HookSpec] = Field(default_factory=list)
+    tool_request_state_key: str = Field(default="tool_request", min_length=1)
+    output_state_key: str = Field(min_length=1)
+
+
+class ToolSpec(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+
+
+class ToolExecutorNodeConfig(NodeConfig):
+    kind: Literal["tool_executor"] = "tool_executor"
+    model_config = ConfigDict(extra="ignore")
+
+    tool_request_state_key: str = Field(default="tool_request", min_length=1)
+    output_state_key: str = Field(default="tool_result", min_length=1)
+    history_state_key: str = Field(default="tool_result_history", min_length=1)
+    runtime_config_state_key: str = "runtime_config"
+    tools: list[ToolSpec] = Field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
+    cwd_only: bool = True
+    context_pressure_state_key: str = Field(default="context_pressure_exceeded", min_length=1)
+    compaction_threshold_chars: int = Field(12_000, gt=0)
+
+
+class CompactorPipelineStage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    stage: str
+    model: str | None = None
+    preserves_last_n_turns: int | None = None
+    max_verbose_turns: int | None = None
+    max_chars: int | None = None
+    collapse_same_role: bool | None = None
+    similarity_threshold: float | None = None
+    replace_file_content_with: str | None = None
+
+
+class ContextCompactorNodeConfig(NodeConfig):
+    kind: Literal["context_compactor"] = "context_compactor"
+    model_config = ConfigDict(extra="ignore")
+
+    history_state_key: str = Field(default="tool_result_history", min_length=1)
+    agent_messages_state_key: str = Field(default="agent_messages", min_length=1)
+    output_state_key: str = Field(default="compacted_context", min_length=1)
+    preserve_last_n: int = Field(3, gt=0)
+    max_chars: int = Field(8000, gt=0)
+    context_pressure_state_key: str = Field(default="context_pressure_exceeded", min_length=1)
+    pipeline: list[CompactorPipelineStage] = Field(default_factory=list)
+    always_preserve: list[str] = Field(default_factory=list)
+
+
+class SubagentOrchestratorNodeConfig(NodeConfig):
+    kind: Literal["subagent_orchestrator"] = "subagent_orchestrator"
+    model_config = ConfigDict(extra="ignore")
+
+    tool_request_state_key: str = Field(default="tool_request", min_length=1)
+    output_state_key: str = Field(default="subagent_results", min_length=1)
+    history_state_key: str = Field(default="tool_result_history", min_length=1)
+    topology: str = ""
+    context_isolation: str = ""
+    return_mode: str = ""
+    max_parallel: int = 1
+    merge_strategy: str = ""
+    token_cost_multiplier: float = 1.0
+
+
+class SubagentPlanNodeConfig(NodeConfig):
+    kind: Literal["subagent_plan"] = "subagent_plan"
+    model_config = ConfigDict(extra="ignore")
+
+    tool_request_state_key: str = Field(default="tool_request", min_length=1)
+    user_input_state_key: str = Field(default="user_input", min_length=1)
+    output_tasks_state_key: str = Field(default="subagent_tasks", min_length=1)
+
+
+class SubagentContextNodeConfig(NodeConfig):
+    kind: Literal["subagent_context"] = "subagent_context"
+    model_config = ConfigDict(extra="ignore")
+
+    tasks_state_key: str = Field(default="subagent_tasks", min_length=1)
+    user_input_state_key: str = Field(default="user_input", min_length=1)
+    task_plan_state_key: str = Field(default="task_plan", min_length=1)
+    compacted_context_state_key: str = Field(default="compacted_context", min_length=1)
+    assembled_context_state_key: str = Field(default="assembled_context", min_length=1)
+    tool_result_history_state_key: str = Field(default="tool_result_history", min_length=1)
+    max_context_chars: int = Field(8000, gt=0)
+    output_child_inputs_state_key: str = Field(default="subagent_child_inputs", min_length=1)
+
+
+class SubagentSpawnNodeConfig(NodeConfig):
+    kind: Literal["subagent_spawn"] = "subagent_spawn"
+    model_config = ConfigDict(extra="ignore")
+
+    child_workflow: str = Field(default="claude_code_subagent_workflow", min_length=1)
+    child_inputs_state_key: str = Field(default="subagent_child_inputs", min_length=1)
+    execute_children: bool = True
+    max_child_recursion: int = Field(30, gt=0)
+    output_child_runs_state_key: str = Field(default="subagent_child_runs", min_length=1)
+    lineage_dirname: str = "subagent_runs"
+
+
+class SubagentJoinNodeConfig(NodeConfig):
+    kind: Literal["subagent_join"] = "subagent_join"
+    model_config = ConfigDict(extra="ignore")
+
+    child_runs_state_key: str = Field(default="subagent_child_runs", min_length=1)
+    output_joined_state_key: str = Field(default="subagent_joined", min_length=1)
+
+
+class SubagentSummarizeNodeConfig(NodeConfig):
+    kind: Literal["subagent_summarize"] = "subagent_summarize"
+    model_config = ConfigDict(extra="ignore")
+
+    joined_state_key: str = Field(default="subagent_joined", min_length=1)
+    output_state_key: str = Field(default="subagent_results", min_length=1)
+    history_state_key: str = Field(default="tool_result_history", min_length=1)
+    max_summary_chars: int = Field(4000, gt=0)
+
+
+class MemoryWriterNodeConfig(NodeConfig):
+    kind: Literal["memory_writer"] = "memory_writer"
+    model_config = ConfigDict(extra="ignore")
+
+    suggestion_state_key: str = Field(min_length=1)
+    write_mode: str = "artifact"
+    target_path: str = ""
+    output_state_key: str = "memory_write_result"
 
 
 class LoopConfig(BaseModel):

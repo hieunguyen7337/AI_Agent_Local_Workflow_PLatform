@@ -62,8 +62,12 @@ def make_embedding_node(
             try:
                 if cancellation is not None and cancellation.is_cancelled():
                     raise CancelledError("user_cancelled")
+                if cfg.input_state_key:
+                    raw_text = str(state.get(cfg.input_state_key, "") or "")
+                else:
+                    raw_text = _format_template(cfg.input_template, state)
                 input_payload = _build_embedding_input(
-                    _format_template(cfg.input_template, state),
+                    raw_text,
                     state,
                     cfg.image_inputs,
                 )
@@ -95,7 +99,7 @@ def make_embedding_node(
                             "node_kind": "embedding",
                             "status": "ok",
                             "model": resp.model,
-                            "input_template": _format_template(cfg.input_template, state),
+                            "input_template": raw_text if cfg.input_state_key else _format_template(cfg.input_template, state),
                             "image_inputs": [
                                 {"state_key": item.state_key, "path": str(state.get(item.state_key, "")), "detail": item.detail}
                                 for item in cfg.image_inputs
