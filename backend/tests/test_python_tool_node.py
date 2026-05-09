@@ -719,11 +719,16 @@ def test_workflow_state_declares_description_keys():
     assert "query_description_embedding" in WorkflowState.__annotations__
     assert "description_facets_ranked" in WorkflowState.__annotations__
     assert "description_semantic_ranked" in WorkflowState.__annotations__
+    assert "torchreid_visual_ranked" in WorkflowState.__annotations__
+    assert "fastreid_visual_ranked" in WorkflowState.__annotations__
     assert "fusion_weight_analysis" in WorkflowState.__annotations__
+    assert "fusion_weight_config" in WorkflowState.__annotations__
     assert "query_description_db_path" in WorkflowState.__annotations__
     assert "gallery_description_db_path" in WorkflowState.__annotations__
     assert "retrieval_score_db_path" in WorkflowState.__annotations__
     assert "retrieval_score_top_k" in WorkflowState.__annotations__
+    assert "channel_torchreid_visual_embedding" in WorkflowState.__annotations__
+    assert "channel_fastreid_visual_embedding" in WorkflowState.__annotations__
     assert "query_llm_attributes" not in WorkflowState.__annotations__
     assert "llm_attribute_ranked" not in WorkflowState.__annotations__
 

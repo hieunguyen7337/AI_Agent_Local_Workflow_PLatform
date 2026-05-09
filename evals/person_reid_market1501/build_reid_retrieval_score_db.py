@@ -311,9 +311,29 @@ def _insert_visual_rankings(
     gallery_ids, gallery_vectors, gallery_meta = _load_embedding_db(gallery_db)
     _insert_manifest_rows(con, query_meta=query_meta, gallery_meta=gallery_meta)
 
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+
+    gallery_matrix = np.asarray(gallery_vectors, dtype=np.float64) if np is not None else None
+    limit = min(int(top_k), len(gallery_ids))
     insert_rows: list[tuple[str, str, int, str, float]] = []
     for index, (query_id, query_vector) in enumerate(zip(query_ids, query_vectors), start=1):
-        for rank, gallery_id, score in _rank_query(query_vector, gallery_ids, gallery_vectors, top_k):
+        if gallery_matrix is not None and np is not None:
+            scores = gallery_matrix @ np.asarray(query_vector, dtype=np.float64)
+            if limit >= len(gallery_ids):
+                order = np.argsort(-scores)
+            else:
+                partial = np.argpartition(-scores, limit - 1)[:limit]
+                order = partial[np.argsort(-scores[partial])]
+            ranked = [
+                (rank, gallery_ids[int(gallery_index)], float(scores[int(gallery_index)]))
+                for rank, gallery_index in enumerate(order, start=1)
+            ]
+        else:
+            ranked = _rank_query(query_vector, gallery_ids, gallery_vectors, top_k)
+        for rank, gallery_id, score in ranked:
             insert_rows.append((query_id, channel, rank, gallery_id, score))
         if len(insert_rows) >= 50_000:
             con.executemany("INSERT INTO retrieval_rankings VALUES (?, ?, ?, ?, ?)", insert_rows)

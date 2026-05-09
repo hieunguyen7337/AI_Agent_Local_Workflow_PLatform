@@ -93,13 +93,18 @@ class WorkflowState(TypedDict, total=False):
     query_llm_description: str
     description_facets_ranked: list[str]
     description_semantic_ranked: list[str]
+    torchreid_visual_ranked: list[str]
+    fastreid_visual_ranked: list[str]
     query_description_embedding: list[float]
     fusion_weight_analysis: dict[str, Any]
+    fusion_weight_config: dict[str, Any]
     query_description_db_path: str
     gallery_description_db_path: str
     retrieval_score_db_path: str
     retrieval_score_top_k: int
     channel_visual_image_embedding: str
+    channel_torchreid_visual_embedding: str
+    channel_fastreid_visual_embedding: str
     channel_description_semantic_text: str
     channel_description_structured_facets: str
 
