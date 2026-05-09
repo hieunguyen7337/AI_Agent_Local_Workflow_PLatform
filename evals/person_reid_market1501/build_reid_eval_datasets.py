@@ -16,6 +16,13 @@ from evals.person_reid_market1501.build_reid_retrieval_score_db import (
     VISUAL_TORCHREID_CHANNEL,
 )
 
+DEFAULT_DUAL_REID_FUSION_WEIGHTS = {
+    "torchreid_visual": 0.45,
+    "fastreid_visual": 0.35,
+    "description_semantic": 0.13,
+    "description_facets": 0.07,
+}
+
 _DEFAULT_BASE_DATASET = Path(__file__).parent / "partition_1000q_5000g" / "dataset.yaml"
 _DEFAULT_OUTPUT_DIR = Path(__file__).parent / "partition_1000q_5000g"
 _DEFAULT_RETRIEVAL_DB = (
@@ -54,6 +61,29 @@ def _write_variant(
     return output
 
 
+def _write_dual_variant(
+    *,
+    rows: list[dict],
+    output: Path,
+    retrieval_db_path: str,
+    retrieval_top_k: int,
+) -> Path:
+    out_rows = []
+    for row in rows:
+        item = dict(row)
+        item["retrieval_score_db_path"] = retrieval_db_path
+        item["retrieval_score_top_k"] = int(retrieval_top_k)
+        item["channel_torchreid_visual_embedding"] = VISUAL_TORCHREID_CHANNEL
+        item["channel_fastreid_visual_embedding"] = VISUAL_FASTREID_CHANNEL
+        item["channel_description_semantic_text"] = DESCRIPTION_CHANNEL_MAP["description_semantic_text"]
+        item["channel_description_structured_facets"] = DESCRIPTION_CHANNEL_MAP["description_structured_facets"]
+        item["fusion_weight_config"] = {"rrf_weights": dict(DEFAULT_DUAL_REID_FUSION_WEIGHTS)}
+        out_rows.append(item)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(yaml.safe_dump(out_rows, sort_keys=False), encoding="utf-8")
+    return output
+
+
 def build_reid_eval_datasets(
     *,
     base_dataset: Path = _DEFAULT_BASE_DATASET,
@@ -68,7 +98,7 @@ def build_reid_eval_datasets(
         "torchreid": (VISUAL_TORCHREID_CHANNEL, output_dir / "dataset_torchreid_reid.yaml"),
         "fastreid": (VISUAL_FASTREID_CHANNEL, output_dir / "dataset_fastreid_reid.yaml"),
     }
-    return {
+    outputs = {
         name: _write_variant(
             rows=rows,
             output=output,
@@ -78,6 +108,13 @@ def build_reid_eval_datasets(
         )
         for name, (channel, output) in variants.items()
     }
+    outputs["dual_reid"] = _write_dual_variant(
+        rows=rows,
+        output=output_dir / "dataset_dual_reid.yaml",
+        retrieval_db_path=retrieval_db_path,
+        retrieval_top_k=retrieval_top_k,
+    )
+    return outputs
 
 
 def main() -> None:

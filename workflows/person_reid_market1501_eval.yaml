@@ -1,17 +1,15 @@
 schema_version: workflow.graph/v1
 name: person_reid_market1501_eval
 description: >-
-  Eval-friendly person re-identification pipeline for a 1000-query / 5000-gallery
-  Market-1501 partition. It has three explicitly named retrieval paths, each
-  represented by one query-side python_tool lookup against the Gemma retrieval
-  score DB. Path 1, eval_visual_image_embedding, reads a precomputed visual
-  top-200 ranking. Path 2, eval_description_semantic_text, reads a precomputed
-  description-text embedding top-200 ranking. Path 3,
-  eval_description_structured_facets, reads a precomputed structured-facet
-  top-200 ranking. Adaptive RRF fusion combines all three.
+  Four-path eval-friendly Market-1501 person ReID pipeline. It uses precomputed
+  Torchreid visual rankings, precomputed FastReID visual rankings, precomputed
+  description semantic rankings, and precomputed structured facet rankings.
+  Runtime work is SQLite lookup plus configurable weighted RRF only.
 category: agentic
 tags:
   - person-reid
+  - torchreid
+  - fastreid
   - multimodal
   - retrieval
   - market1501
@@ -30,31 +28,34 @@ nodes:
       user_input: user_input
     output_state_key: start_marker
 
-  - id: multimodal_embedding_lookup
+  - id: torchreid_visual_lookup
     kind: python_tool
-    name: Path 1 - eval_visual_image_embedding precomputed ranking lookup
-    description: >-
-      Single query-side python node for the visual path. Reads top-200 gallery
-      IDs for channel visual_image_embedding from the Gemma retrieval score DB.
-      Example: query_id "0004_c3s3_065619_00.jpg" returns gallery IDs ranked by
-      query-image embedding vs gallery-image embedding cosine score.
+    name: Path 1 - Torchreid visual ReID precomputed ranking lookup
+    description: Reads top-k gallery IDs for the Torchreid OSNet visual ReID channel.
     callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
     inputs:
       query_id: user_input
       retrieval_score_db_path: retrieval_score_db_path
-      channel: channel_visual_image_embedding
+      channel: channel_torchreid_visual_embedding
       top_k: retrieval_score_top_k
-    output_state_key: reid_multimodal_embedding_ranked
+    output_state_key: torchreid_visual_ranked
+
+  - id: fastreid_visual_lookup
+    kind: python_tool
+    name: Path 2 - FastReID visual ReID precomputed ranking lookup
+    description: Reads top-k gallery IDs for the FastReID SBS R101-IBN visual ReID channel.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_fastreid_visual_embedding
+      top_k: retrieval_score_top_k
+    output_state_key: fastreid_visual_ranked
 
   - id: description_embedding_lookup
     kind: python_tool
-    name: Path 2 - eval_description_semantic_text precomputed ranking lookup
-    description: >-
-      Single query-side python node for the semantic text path. Reads top-200
-      gallery IDs for channel description_semantic_text from the Gemma retrieval
-      score DB. Example: "white short-sleeved t-shirt and dark shorts" returns
-      gallery IDs ranked by query-description embedding vs gallery-description
-      embedding cosine score.
+    name: Path 3 - description_semantic_text precomputed ranking lookup
+    description: Reads top-k gallery IDs for the retained description semantic text channel.
     callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
     inputs:
       query_id: user_input
@@ -65,12 +66,8 @@ nodes:
 
   - id: description_lookup
     kind: python_tool
-    name: Path 3 - eval_description_structured_facets precomputed ranking lookup
-    description: >-
-      Single query-side python node for the structured facet path. Reads top-200
-      gallery IDs for channel description_structured_facets from the Gemma
-      retrieval score DB. Example: "red short-sleeved t-shirt, black shorts,
-      backpack" returns gallery IDs ranked by region-aware facet score.
+    name: Path 4 - description_structured_facets precomputed ranking lookup
+    description: Reads top-k gallery IDs for the retained structured facet channel.
     callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
     inputs:
       query_id: user_input
@@ -79,51 +76,38 @@ nodes:
       top_k: retrieval_score_top_k
     output_state_key: description_facets_ranked
 
-  - id: adaptive_fusion_weight_router
+  - id: weighted_dual_reid_reciprocal_rank_fusion
     kind: python_tool
-    name: Decide adaptive ReID fusion weights
+    name: Fuse Torchreid + FastReID + description retrieval paths
     description: >-
-      Detects strong agreement between eval_description_semantic_text and
-      eval_description_structured_facets. If their shared top candidate is weak
-      or absent in eval_visual_image_embedding, it emits description-heavy
-      weights; otherwise it keeps visual-heavy defaults.
-    callable_path: backend.tools.reid_specialists.decide_reid_fusion_weights
+      Combines Torchreid visual, FastReID visual, semantic description, and
+      structured facet rankings with configurable weighted reciprocal-rank
+      fusion. Set any path weight to 0 for ablations.
+    callable_path: backend.tools.reid_specialists.weighted_dual_reid_reciprocal_rank_fusion
     inputs:
-      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      torchreid_visual_ranked: torchreid_visual_ranked
+      fastreid_visual_ranked: fastreid_visual_ranked
       description_semantic_ranked: description_semantic_ranked
       description_facets_ranked: description_facets_ranked
-    output_state_key: fusion_weight_analysis
-
-  - id: weighted_reciprocal_rank_fusion
-    kind: python_tool
-    name: Fuse eval_visual_image_embedding + eval_description_semantic_text + eval_description_structured_facets
-    description: >-
-      Combines the three precomputed path rankings with weighted reciprocal-rank
-      fusion. The adaptive router can reverse emphasis toward the two
-      description paths when semantic and facet paths agree but the visual path
-      disagrees.
-    callable_path: backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
-    inputs:
-      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
-      description_semantic_ranked: description_semantic_ranked
-      description_facets_ranked: description_facets_ranked
-      fusion_weight_analysis: fusion_weight_analysis
+      fusion_weight_config: fusion_weight_config
     output_state_key: ranked_gallery_ids
 
 edges:
   - from: start
-    to: multimodal_embedding_lookup
+    to: torchreid_visual_lookup
+  - from: start
+    to: fastreid_visual_lookup
   - from: start
     to: description_embedding_lookup
   - from: start
     to: description_lookup
-  - from: multimodal_embedding_lookup
-    to: adaptive_fusion_weight_router
+  - from: torchreid_visual_lookup
+    to: weighted_dual_reid_reciprocal_rank_fusion
+  - from: fastreid_visual_lookup
+    to: weighted_dual_reid_reciprocal_rank_fusion
   - from: description_embedding_lookup
-    to: adaptive_fusion_weight_router
+    to: weighted_dual_reid_reciprocal_rank_fusion
   - from: description_lookup
-    to: adaptive_fusion_weight_router
-  - from: adaptive_fusion_weight_router
-    to: weighted_reciprocal_rank_fusion
-  - from: weighted_reciprocal_rank_fusion
+    to: weighted_dual_reid_reciprocal_rank_fusion
+  - from: weighted_dual_reid_reciprocal_rank_fusion
     to: __end__

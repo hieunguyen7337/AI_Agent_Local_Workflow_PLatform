@@ -7,4 +7,5 @@ allowed_callables:
   - backend.tools.reid_specialists.lookup_query_reid_embedding_from_eval_db
   - backend.tools.reid_specialists.mark_workflow_start
   - backend.tools.reid_specialists.retrieve_gallery_by_description_facets
+  - backend.tools.reid_specialists.weighted_dual_reid_reciprocal_rank_fusion
   - backend.tools.reid_specialists.weighted_reciprocal_rank_fusion

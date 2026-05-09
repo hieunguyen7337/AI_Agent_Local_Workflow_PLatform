@@ -1,21 +1,18 @@
 schema_version: workflow.graph/v1
-name: person_reid_market1501
+name: person_reid_market1501_gemini
 description: >-
-  Four-path Market-1501 person ReID workflow. It replaces the generic visual
-  image embedding branch with two precomputed visual ReID branches: Torchreid
-  OSNet and FastReID SBS R101-IBN. It keeps live description semantic and
-  structured facet branches, then combines all four paths with configurable
-  weighted reciprocal-rank fusion.
+  Legacy Market-1501 person re-identification workflow that uses the original
+  generic Gemini visual image embedding path plus description semantic and
+  structured facet retrieval paths.
 category: agentic
 tags:
   - person-reid
-  - torchreid
-  - fastreid
   - multimodal
   - retrieval
   - market1501
+  - gemini-visual
 budget:
-  cost_usd: 1.00
+  cost_usd: 1.50
   latency_ms: 600000
 entry: start
 nodes:
@@ -27,30 +24,6 @@ nodes:
     inputs:
       user_input: user_input
     output_state_key: start_marker
-
-  - id: torchreid_visual_lookup
-    kind: python_tool
-    name: Path 1 - Torchreid visual ReID precomputed ranking lookup
-    description: Reads top-k gallery IDs for the Torchreid OSNet visual ReID channel.
-    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
-    inputs:
-      query_id: user_input
-      retrieval_score_db_path: retrieval_score_db_path
-      channel: channel_torchreid_visual_embedding
-      top_k: retrieval_score_top_k
-    output_state_key: torchreid_visual_ranked
-
-  - id: fastreid_visual_lookup
-    kind: python_tool
-    name: Path 2 - FastReID visual ReID precomputed ranking lookup
-    description: Reads top-k gallery IDs for the FastReID SBS R101-IBN visual ReID channel.
-    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
-    inputs:
-      query_id: user_input
-      retrieval_score_db_path: retrieval_score_db_path
-      channel: channel_fastreid_visual_embedding
-      top_k: retrieval_score_top_k
-    output_state_key: fastreid_visual_ranked
 
   - id: llm_description_parser
     kind: llm
@@ -93,7 +66,7 @@ nodes:
 
   - id: description_facets_retriever
     kind: python_tool
-    name: Path 4 - description_structured_facets
+    name: Path 3 - description_structured_facets
     description: Scores gallery descriptions against the generated query description using structured person facets.
     callable_path: backend.tools.reid_specialists.retrieve_gallery_by_description_facets
     inputs:
@@ -102,9 +75,29 @@ nodes:
       top_k: retrieval_top_k
     output_state_key: description_facets_ranked
 
+  - id: reid_multimodal_embedding
+    kind: embedding
+    name: Path 1 - legacy generic visual image embedding query encoder
+    provider: openrouter
+    model: google/gemini-embedding-2-preview
+    input_template: ""
+    image_inputs:
+      - state_key: query_image_path
+        detail: auto
+    output_state_key: query_multimodal_embedding
+
+  - id: reid_multimodal_embedding_retriever
+    kind: vector_retriever
+    name: Path 1 - legacy generic visual image embedding gallery retrieval
+    description: Retrieves gallery images by cosine similarity between generic image embeddings.
+    index_path: "{gallery_embedding_db_path}"
+    query_embedding_state_key: query_multimodal_embedding
+    output_state_key: reid_multimodal_embedding_ranked
+    top_k: 200
+
   - id: description_semantic_embedding
     kind: embedding
-    name: Path 3 - description_semantic_text query encoder
+    name: Path 2 - description_semantic_text query encoder
     description: Embeds the generated natural-language person description for description retrieval.
     provider: openrouter
     model: google/gemini-embedding-2-preview
@@ -113,49 +106,56 @@ nodes:
 
   - id: description_semantic_retriever
     kind: vector_retriever
-    name: Path 3 - description_semantic_text gallery retrieval
+    name: Path 2 - description_semantic_text gallery retrieval
     description: Retrieves top-k gallery rows by text-embedding similarity over offline gallery descriptions.
     index_path: "{gallery_description_db_path}"
     query_embedding_state_key: query_description_embedding
     output_state_key: description_semantic_ranked
     top_k: 200
 
-  - id: weighted_dual_reid_reciprocal_rank_fusion
+  - id: adaptive_fusion_weight_router
     kind: python_tool
-    name: Fuse Torchreid + FastReID + description retrieval paths
-    description: >-
-      Combines Torchreid visual, FastReID visual, semantic description, and
-      structured facet rankings with configurable weighted reciprocal-rank
-      fusion. Set any path weight to 0 for ablations.
-    callable_path: backend.tools.reid_specialists.weighted_dual_reid_reciprocal_rank_fusion
+    name: Decide adaptive ReID fusion weights
+    description: Chooses visual-heavy or description-heavy RRF weights from rank agreement.
+    callable_path: backend.tools.reid_specialists.decide_reid_fusion_weights
     inputs:
-      torchreid_visual_ranked: torchreid_visual_ranked
-      fastreid_visual_ranked: fastreid_visual_ranked
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
       description_semantic_ranked: description_semantic_ranked
       description_facets_ranked: description_facets_ranked
-      fusion_weight_config: fusion_weight_config
+    output_state_key: fusion_weight_analysis
+
+  - id: weighted_reciprocal_rank_fusion
+    kind: python_tool
+    name: Fuse legacy generic visual + description retrieval paths
+    description: Combines generic visual, semantic description, and structured facet rankings with weighted RRF.
+    callable_path: backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
+    inputs:
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+      fusion_weight_analysis: fusion_weight_analysis
     output_state_key: ranked_gallery_ids
 
 edges:
   - from: start
-    to: torchreid_visual_lookup
-  - from: start
-    to: fastreid_visual_lookup
-  - from: start
     to: llm_description_parser
+  - from: start
+    to: reid_multimodal_embedding
   - from: llm_description_parser
     to: description_facets_retriever
   - from: llm_description_parser
     to: description_semantic_embedding
+  - from: reid_multimodal_embedding
+    to: reid_multimodal_embedding_retriever
   - from: description_semantic_embedding
     to: description_semantic_retriever
-  - from: torchreid_visual_lookup
-    to: weighted_dual_reid_reciprocal_rank_fusion
-  - from: fastreid_visual_lookup
-    to: weighted_dual_reid_reciprocal_rank_fusion
+  - from: reid_multimodal_embedding_retriever
+    to: adaptive_fusion_weight_router
   - from: description_semantic_retriever
-    to: weighted_dual_reid_reciprocal_rank_fusion
+    to: adaptive_fusion_weight_router
   - from: description_facets_retriever
-    to: weighted_dual_reid_reciprocal_rank_fusion
-  - from: weighted_dual_reid_reciprocal_rank_fusion
+    to: adaptive_fusion_weight_router
+  - from: adaptive_fusion_weight_router
+    to: weighted_reciprocal_rank_fusion
+  - from: weighted_reciprocal_rank_fusion
     to: __end__

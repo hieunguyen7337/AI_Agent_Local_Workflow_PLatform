@@ -419,6 +419,13 @@ DESCRIPTION_HEAVY_FUSION_WEIGHTS: dict[str, float] = {
     "description_facets": 0.30,
 }
 
+DEFAULT_DUAL_REID_FUSION_WEIGHTS: dict[str, float] = {
+    "torchreid_visual": 0.45,
+    "fastreid_visual": 0.35,
+    "description_semantic": 0.13,
+    "description_facets": 0.07,
+}
+
 
 def _parse_fusion_weights(value: Any) -> dict[str, float]:
     parsed = _json_from_text(value)
@@ -458,6 +465,58 @@ def weighted_reciprocal_rank_fusion(
     weights = _parse_fusion_weights(fusion_weight_analysis)
     ranked_inputs = [
         (reid_multimodal_embedding_ranked or [], weights["reid_multimodal_embedding"]),
+        (description_semantic_ranked or [], weights["description_semantic"]),
+        (description_facets_ranked or [], weights["description_facets"]),
+    ]
+    scores: dict[str, float] = {}
+    for ranked, weight in ranked_inputs:
+        if weight <= 0 or not ranked:
+            continue
+        for rank, gallery_id in enumerate(ranked, start=1):
+            gid = str(gallery_id)
+            scores[gid] = scores.get(gid, 0.0) + weight / (_RRF_K + rank)
+    return sorted(scores, key=lambda gid: (-scores[gid], gid))[: int(top_k)]
+
+
+def _parse_dual_reid_fusion_weights(value: Any) -> dict[str, float]:
+    parsed = _json_from_text(value)
+    if not isinstance(parsed, dict):
+        return dict(DEFAULT_DUAL_REID_FUSION_WEIGHTS)
+    raw_weights = parsed.get("rrf_weights", parsed)
+    if not isinstance(raw_weights, dict):
+        return dict(DEFAULT_DUAL_REID_FUSION_WEIGHTS)
+
+    weights: dict[str, float] = {}
+    for key, default in DEFAULT_DUAL_REID_FUSION_WEIGHTS.items():
+        try:
+            weight = float(raw_weights.get(key, default))
+        except (TypeError, ValueError):
+            return dict(DEFAULT_DUAL_REID_FUSION_WEIGHTS)
+        if weight < 0:
+            return dict(DEFAULT_DUAL_REID_FUSION_WEIGHTS)
+        weights[key] = weight
+    if sum(weights.values()) <= 0:
+        return dict(DEFAULT_DUAL_REID_FUSION_WEIGHTS)
+    return weights
+
+
+def weighted_dual_reid_reciprocal_rank_fusion(
+    torchreid_visual_ranked: list[str] | None = None,
+    fastreid_visual_ranked: list[str] | None = None,
+    description_semantic_ranked: list[str] | None = None,
+    description_facets_ranked: list[str] | None = None,
+    fusion_weight_config: str | dict[str, Any] | None = None,
+    top_k: int = 20,
+) -> list[str]:
+    """Fuse Torchreid, FastReID, and description rankings via weighted RRF.
+
+    Weights are intentionally runtime-configurable so ablations can set any path
+    to zero while keeping a stable four-path graph.
+    """
+    weights = _parse_dual_reid_fusion_weights(fusion_weight_config)
+    ranked_inputs = [
+        (torchreid_visual_ranked or [], weights["torchreid_visual"]),
+        (fastreid_visual_ranked or [], weights["fastreid_visual"]),
         (description_semantic_ranked or [], weights["description_semantic"]),
         (description_facets_ranked or [], weights["description_facets"]),
     ]

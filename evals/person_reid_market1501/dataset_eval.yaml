@@ -1,11 +1,9 @@
-dataset_path: evals/person_reid_market1501/partition_1000q_5000g/dataset.yaml
+dataset_path: evals/person_reid_market1501/partition_1000q_5000g/dataset_dual_reid.yaml
 dataset_format: yaml
 input_mapping:
   user_input: query_id
   query_image_path: query_image_path
-  query_embedding_db_path: query_embedding_db_path
   query_description_db_path: query_description_db_path
-  gallery_embedding_db_path: gallery_embedding_db_path
   gallery_description_db_path: gallery_description_db_path
   retrieval_top_k: retrieval_top_k
   query_pid: query_pid
@@ -14,9 +12,11 @@ input_mapping:
   gallery_camids: gallery_camids
   retrieval_score_db_path: retrieval_score_db_path
   retrieval_score_top_k: retrieval_score_top_k
-  channel_visual_image_embedding: channel_visual_image_embedding
+  channel_torchreid_visual_embedding: channel_torchreid_visual_embedding
+  channel_fastreid_visual_embedding: channel_fastreid_visual_embedding
   channel_description_semantic_text: channel_description_semantic_text
   channel_description_structured_facets: channel_description_structured_facets
+  fusion_weight_config: fusion_weight_config
 max_concurrency: 2
 scorers:
 - id: market1501_map_cmc

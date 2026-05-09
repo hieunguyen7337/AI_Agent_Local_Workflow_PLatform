@@ -747,43 +747,36 @@ def test_person_reid_workflow_spec_loads():
     assert "parse_final_ranking" not in node_kinds
     assert "boss_orchestrator" not in node_kinds
     assert "rrf_precompute" not in node_kinds
+    assert "reid_multimodal_embedding" not in node_kinds
+    assert "reid_multimodal_embedding_retriever" not in node_kinds
     assert node_kinds["start"] == "python_tool"
+    assert node_kinds["torchreid_visual_lookup"] == "python_tool"
+    assert node_kinds["fastreid_visual_lookup"] == "python_tool"
     assert node_kinds["llm_description_parser"] == "llm"
     assert node_kinds["description_facets_retriever"] == "python_tool"
-    assert node_kinds["reid_multimodal_embedding"] == "embedding"
-    assert node_kinds["reid_multimodal_embedding_retriever"] == "vector_retriever"
     assert node_kinds["description_semantic_embedding"] == "embedding"
     assert node_kinds["description_semantic_retriever"] == "vector_retriever"
-    assert node_kinds["adaptive_fusion_weight_router"] == "python_tool"
-    assert node_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
+    assert node_kinds["weighted_dual_reid_reciprocal_rank_fusion"] == "python_tool"
     for node in spec.nodes:
         if node.kind == "python_tool":
             assert node.name.strip()
             assert node.description.strip()
     description = next(n for n in spec.nodes if n.id == "llm_description_parser")
     facets_retriever = next(n for n in spec.nodes if n.id == "description_facets_retriever")
-    embedding = next(n for n in spec.nodes if n.id == "reid_multimodal_embedding")
+    torch_lookup = next(n for n in spec.nodes if n.id == "torchreid_visual_lookup")
+    fast_lookup = next(n for n in spec.nodes if n.id == "fastreid_visual_lookup")
     desc_embedding = next(n for n in spec.nodes if n.id == "description_semantic_embedding")
     desc_semantic = next(n for n in spec.nodes if n.id == "description_semantic_retriever")
-    visual_retriever = next(n for n in spec.nodes if n.id == "reid_multimodal_embedding_retriever")
-    router = next(n for n in spec.nodes if n.id == "adaptive_fusion_weight_router")
-    rrf = next(n for n in spec.nodes if n.id == "weighted_reciprocal_rank_fusion")
+    rrf = next(n for n in spec.nodes if n.id == "weighted_dual_reid_reciprocal_rank_fusion")
     assert description.model == "google/gemma-4-31b-it"
-    assert embedding.model == "google/gemini-embedding-2-preview"
+    assert torch_lookup.inputs["channel"] == "channel_torchreid_visual_embedding"
+    assert fast_lookup.inputs["channel"] == "channel_fastreid_visual_embedding"
     assert desc_embedding.model == "google/gemini-embedding-2-preview"
     assert desc_embedding.input_state_key == "query_llm_description"
-    assert visual_retriever.top_k == 200
     assert desc_semantic.index_path == "{gallery_description_db_path}"
     assert desc_semantic.query_embedding_state_key == "query_description_embedding"
     assert desc_semantic.top_k == 200
-    assert router.callable_path == "backend.tools.reid_specialists.decide_reid_fusion_weights"
-    assert set((router.inputs or {}).keys()) == {
-        "reid_multimodal_embedding_ranked",
-        "description_semantic_ranked",
-        "description_facets_ranked",
-    }
     assert description.image_inputs[0].state_key == "query_image_path"
-    assert embedding.input_template == ""
     assert "Describe ONLY the visible person" in description.user_prompt_template
     assert "background" in description.user_prompt_template
     assert facets_retriever.callable_path == "backend.tools.reid_specialists.retrieve_gallery_by_description_facets"
@@ -791,10 +784,11 @@ def test_person_reid_workflow_spec_loads():
     assert facets_retriever.inputs.get("gallery_description_db_path") == "gallery_description_db_path"
     assert rrf.output_state_key == "ranked_gallery_ids"
     assert set((rrf.inputs or {}).keys()) == {
-        "reid_multimodal_embedding_ranked",
+        "torchreid_visual_ranked",
+        "fastreid_visual_ranked",
         "description_semantic_ranked",
         "description_facets_ranked",
-        "fusion_weight_analysis",
+        "fusion_weight_config",
     }
 
 
@@ -812,37 +806,55 @@ def test_person_reid_eval_workflow_spec_loads():
     assert "boss_orchestrator" not in node_kinds
     assert "rrf_precompute" not in node_kinds
     assert node_kinds["start"] == "python_tool"
-    assert node_kinds["multimodal_embedding_lookup"] == "python_tool"
+    assert node_kinds["torchreid_visual_lookup"] == "python_tool"
+    assert node_kinds["fastreid_visual_lookup"] == "python_tool"
     assert "reid_multimodal_embedding_retriever" not in node_kinds
     assert node_kinds["description_embedding_lookup"] == "python_tool"
     assert node_kinds["description_lookup"] == "python_tool"
     assert "description_semantic_retriever" not in node_kinds
     assert "description_facets_retriever" not in node_kinds
-    assert node_kinds["adaptive_fusion_weight_router"] == "python_tool"
-    assert node_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
+    assert node_kinds["weighted_dual_reid_reciprocal_rank_fusion"] == "python_tool"
     for node in spec.nodes:
         if node.kind == "python_tool":
             assert node.name.strip()
             assert node.description.strip()
-    visual_lookup = next(n for n in spec.nodes if n.id == "multimodal_embedding_lookup")
+    torch_lookup = next(n for n in spec.nodes if n.id == "torchreid_visual_lookup")
+    fast_lookup = next(n for n in spec.nodes if n.id == "fastreid_visual_lookup")
     desc_lookup = next(n for n in spec.nodes if n.id == "description_lookup")
     desc_embedding_lookup = next(n for n in spec.nodes if n.id == "description_embedding_lookup")
-    router = next(n for n in spec.nodes if n.id == "adaptive_fusion_weight_router")
-    rrf = next(n for n in spec.nodes if n.id == "weighted_reciprocal_rank_fusion")
-    assert visual_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
-    assert visual_lookup.inputs["channel"] == "channel_visual_image_embedding"
+    rrf = next(n for n in spec.nodes if n.id == "weighted_dual_reid_reciprocal_rank_fusion")
+    assert torch_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
+    assert torch_lookup.inputs["channel"] == "channel_torchreid_visual_embedding"
+    assert fast_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
+    assert fast_lookup.inputs["channel"] == "channel_fastreid_visual_embedding"
     assert desc_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
     assert desc_lookup.inputs["channel"] == "channel_description_structured_facets"
     assert desc_embedding_lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
     assert desc_embedding_lookup.inputs["channel"] == "channel_description_semantic_text"
-    assert router.callable_path == "backend.tools.reid_specialists.decide_reid_fusion_weights"
     assert rrf.output_state_key == "ranked_gallery_ids"
     assert set((rrf.inputs or {}).keys()) == {
-        "reid_multimodal_embedding_ranked",
+        "torchreid_visual_ranked",
+        "fastreid_visual_ranked",
         "description_semantic_ranked",
         "description_facets_ranked",
-        "fusion_weight_analysis",
+        "fusion_weight_config",
     }
+
+
+def test_person_reid_gemini_legacy_workflows_keep_specific_names():
+    from backend.graphspec import load_graph_spec
+
+    normal = load_graph_spec("person_reid_market1501_gemini")
+    normal_kinds = {n.id: n.kind for n in normal.nodes}
+    assert normal_kinds["reid_multimodal_embedding"] == "embedding"
+    assert normal_kinds["reid_multimodal_embedding_retriever"] == "vector_retriever"
+    visual_embedding = next(n for n in normal.nodes if n.id == "reid_multimodal_embedding")
+    assert visual_embedding.model == "google/gemini-embedding-2-preview"
+
+    eval_spec = load_graph_spec("person_reid_market1501_gemini_eval")
+    eval_kinds = {n.id: n.kind for n in eval_spec.nodes}
+    assert eval_kinds["multimodal_embedding_lookup"] == "python_tool"
+    assert eval_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
 
 
 def test_person_reid_reid_eval_workflow_variants_load():
