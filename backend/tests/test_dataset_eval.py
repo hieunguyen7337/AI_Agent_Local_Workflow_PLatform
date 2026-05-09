@@ -745,3 +745,140 @@ def test_description_db_builder_uses_default_vision_model(monkeypatch, tmp_path:
     )
     assert captured_models[0] == "google/gemma-4-31b-it"
     assert captured_models[1] == "google/gemini-embedding-2-preview"
+
+
+def test_reid_pt_importer_writes_platform_embedding_schema(tmp_path: Path):
+    from evals.person_reid_market1501.import_reid_embedding_pts import extract_reid_rows, write_embedding_db
+
+    payload = {
+        "items": [
+            "/data/query/0001_c1s1_000001_00.jpg",
+            "/data/query/0002_c2s1_000001_00.jpg",
+        ],
+        "embeddings": [
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ],
+    }
+    rows = extract_reid_rows(payload, source="torchreid")
+    output = write_embedding_db(rows=rows, output=tmp_path / "query.sqlite", split="query")
+
+    with sqlite3.connect(output) as con:
+        image_rows = con.execute(
+            "SELECT image_id, image_path, pid, camid, embedding_json FROM image_embeddings ORDER BY image_id"
+        ).fetchall()
+        view_rows = con.execute("SELECT query_id, embedding_json FROM query_embeddings ORDER BY query_id").fetchall()
+
+    assert image_rows == [
+        ("0001_c1s1_000001_00.jpg", "/data/query/0001_c1s1_000001_00.jpg", 1, 1, "[1.0, 0.0]"),
+        ("0002_c2s1_000001_00.jpg", "/data/query/0002_c2s1_000001_00.jpg", 2, 2, "[0.0, 1.0]"),
+    ]
+    assert view_rows == [
+        ("0001_c1s1_000001_00.jpg", "[1.0, 0.0]"),
+        ("0002_c2s1_000001_00.jpg", "[0.0, 1.0]"),
+    ]
+
+
+def test_reid_retrieval_score_db_builder_matches_eval_lookup_format(tmp_path: Path):
+    from evals.person_reid_market1501.build_reid_retrieval_score_db import (
+        DESCRIPTION_CHANNEL_MAP,
+        VISUAL_FASTREID_CHANNEL,
+        VISUAL_TORCHREID_CHANNEL,
+        build_reid_retrieval_score_db,
+    )
+    from evals.person_reid_market1501.import_reid_embedding_pts import write_embedding_db
+
+    torch_query = write_embedding_db(
+        rows=[("0001_c1s1_000001_00.jpg", "/q/0001_c1s1_000001_00.jpg", [1.0, 0.0])],
+        output=tmp_path / "torch_query.sqlite",
+        split="query",
+    )
+    torch_gallery = write_embedding_db(
+        rows=[
+            ("0001_c2s1_000001_00.jpg", "/g/0001_c2s1_000001_00.jpg", [1.0, 0.0]),
+            ("0002_c2s1_000001_00.jpg", "/g/0002_c2s1_000001_00.jpg", [0.0, 1.0]),
+        ],
+        output=tmp_path / "torch_gallery.sqlite",
+        split="gallery",
+    )
+    fast_query = write_embedding_db(
+        rows=[("0001_c1s1_000001_00.jpg", "/q/0001_c1s1_000001_00.jpg", [0.0, 1.0])],
+        output=tmp_path / "fast_query.sqlite",
+        split="query",
+    )
+    fast_gallery = write_embedding_db(
+        rows=[
+            ("0001_c2s1_000001_00.jpg", "/g/0001_c2s1_000001_00.jpg", [1.0, 0.0]),
+            ("0002_c2s1_000001_00.jpg", "/g/0002_c2s1_000001_00.jpg", [0.0, 1.0]),
+        ],
+        output=tmp_path / "fast_gallery.sqlite",
+        split="gallery",
+    )
+
+    description_source = tmp_path / "descriptions.sqlite"
+    with sqlite3.connect(description_source) as con:
+        con.execute(
+            """
+            CREATE TABLE retrieval_rankings (
+                query_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                gallery_id TEXT NOT NULL,
+                score REAL NOT NULL,
+                PRIMARY KEY (query_id, channel, rank)
+            )
+            """
+        )
+        con.executemany(
+            "INSERT INTO retrieval_rankings VALUES (?, ?, ?, ?, ?)",
+            [
+                ("0001_c1s1_000001_00.jpg", "visual_image_embedding", 1, "should_not_copy.jpg", 0.99),
+                ("0001_c1s1_000001_00.jpg", "description_semantic_text", 1, "0002_c2s1_000001_00.jpg", 0.8),
+                ("0001_c1s1_000001_00.jpg", "description_structured_facets", 1, "0001_c2s1_000001_00.jpg", 3.0),
+            ],
+        )
+
+    output = build_reid_retrieval_score_db(
+        output=tmp_path / "rankings.sqlite",
+        top_k=2,
+        torchreid_query_db=torch_query,
+        torchreid_gallery_db=torch_gallery,
+        fastreid_query_db=fast_query,
+        fastreid_gallery_db=fast_gallery,
+        description_source_db=description_source,
+        include_descriptions=True,
+    )
+
+    with sqlite3.connect(output) as con:
+        channels = {
+            row[0] for row in con.execute("SELECT DISTINCT channel FROM retrieval_rankings ORDER BY channel")
+        }
+        torch_ranked = con.execute(
+            "SELECT rank, gallery_id FROM retrieval_rankings WHERE channel = ? ORDER BY rank",
+            (VISUAL_TORCHREID_CHANNEL,),
+        ).fetchall()
+        fast_ranked = con.execute(
+            "SELECT rank, gallery_id FROM retrieval_rankings WHERE channel = ? ORDER BY rank",
+            (VISUAL_FASTREID_CHANNEL,),
+        ).fetchall()
+        copied_visual = con.execute(
+            "SELECT COUNT(*) FROM retrieval_rankings WHERE gallery_id = 'should_not_copy.jpg'"
+        ).fetchone()[0]
+        metadata_channels = {
+            row[0] for row in con.execute("SELECT channel FROM retrieval_channels ORDER BY channel")
+        }
+        json_rows = con.execute(
+            "SELECT ranked_gallery_ids_json FROM retrieval_rankings_json WHERE channel = ?",
+            (VISUAL_TORCHREID_CHANNEL,),
+        ).fetchall()
+
+    assert VISUAL_TORCHREID_CHANNEL in channels
+    assert VISUAL_FASTREID_CHANNEL in channels
+    assert DESCRIPTION_CHANNEL_MAP["description_semantic_text"] in channels
+    assert DESCRIPTION_CHANNEL_MAP["description_structured_facets"] in channels
+    assert "visual_image_embedding" not in channels
+    assert torch_ranked[0] == (1, "0001_c2s1_000001_00.jpg")
+    assert fast_ranked[0] == (1, "0002_c2s1_000001_00.jpg")
+    assert copied_visual == 0
+    assert channels <= metadata_channels
+    assert json_rows

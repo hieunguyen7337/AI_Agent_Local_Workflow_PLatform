@@ -1,0 +1,28 @@
+dataset_path: evals/person_reid_market1501/partition_1000q_5000g/dataset_fastreid_reid.yaml
+dataset_format: yaml
+input_mapping:
+  user_input: query_id
+  retrieval_score_db_path: retrieval_score_db_path
+  retrieval_score_top_k: retrieval_score_top_k
+  channel_visual_image_embedding: channel_visual_image_embedding
+  channel_description_semantic_text: channel_description_semantic_text
+  channel_description_structured_facets: channel_description_structured_facets
+  query_pid: query_pid
+  query_camid: query_camid
+  gallery_ids: gallery_ids
+  gallery_pids: gallery_pids
+  gallery_camids: gallery_camids
+max_concurrency: 25
+scorers:
+- id: market1501_map_cmc
+  type: map_cmc
+  actual: final_state.ranked_gallery_ids
+  gallery_ids: row.gallery_ids
+  gallery_pids: row.gallery_pids
+  gallery_camids: row.gallery_camids
+  query_pid: row.query_pid
+  query_camid: row.query_camid
+  cmc_ks:
+  - 1
+  - 5
+  - 10

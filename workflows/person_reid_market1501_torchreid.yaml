@@ -1,0 +1,151 @@
+schema_version: workflow.graph/v1
+name: person_reid_market1501_torchreid
+description: >-
+  Market-1501 person ReID workflow variant that replaces the generic visual
+  image embedding node with a precomputed Torchreid OSNet visual ranking lookup.
+  It is intended for known Market-1501 query IDs with precomputed ReID rankings.
+category: agentic
+tags:
+  - person-reid
+  - torchreid
+  - multimodal
+  - retrieval
+  - market1501
+budget:
+  cost_usd: 1.00
+  latency_ms: 600000
+entry: start
+nodes:
+  - id: start
+    kind: python_tool
+    name: Mark workflow start
+    description: Marks the explicit workflow start node without reading databases, ranking candidates, or changing user state.
+    callable_path: backend.tools.reid_specialists.mark_workflow_start
+    inputs:
+      user_input: user_input
+    output_state_key: start_marker
+
+  - id: torchreid_visual_lookup
+    kind: python_tool
+    name: Path 1 - Torchreid visual ReID precomputed ranking lookup
+    description: Reads top-k gallery IDs for the Torchreid OSNet visual ReID channel.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_visual_image_embedding
+      top_k: retrieval_score_top_k
+    output_state_key: reid_multimodal_embedding_ranked
+
+  - id: llm_description_parser
+    kind: llm
+    provider: openrouter
+    model: google/gemma-4-31b-it
+    name: Generate query person description
+    system_prompt: >-
+      You write strict person-only descriptions for person re-identification.
+      Return raw JSON only and never describe the background or other people.
+    user_prompt_template: |-
+      Describe ONLY the visible person in this image.
+      Ignore the background, scene, camera angle, image quality, shadows, weather, and any other people.
+      Focus strictly on the main pedestrian: garments, accessories, hair, and visible body presentation.
+      Do not invent details that aren't visible. If a body region is occluded, cropped, or unclear, write "unclear".
+
+      Return only a raw JSON object with these exact keys:
+
+      {{
+        "description":          "<one concise person-only caption, 1-2 sentences>",
+        "facets": {{
+          "upper_body":           "<color + garment type + sleeve length, or 'unclear'>",
+          "lower_body":           "<color + garment type + length, or 'unclear'>",
+          "shoes":                "<color + style, or 'unclear'>",
+          "head_hair":            "<hair length/style + headwear, or 'unclear'>",
+          "carried_items":        ["<each visible item: backpack | handbag | shoulder bag | tote | plastic bag | box | umbrella | phone | briefcase | none>"],
+          "gender_presentation":  "male | female | unclear",
+          "age_presentation":     "child | young adult | adult | older adult | unclear",
+          "pose_view":            "front | back | left | right | unclear",
+          "distinctive_marks":    ["<each short specific visible cue, e.g. 'red logo on chest'>"],
+          "uncertainties":        ["<each region that is occluded/cropped/blurred>"]
+        }}
+      }}
+
+      No markdown, no explanation - raw JSON only.
+    output_state_key: query_llm_description
+    image_inputs:
+      - state_key: query_image_path
+        detail: auto
+    temperature: 0.0
+
+  - id: description_facets_retriever
+    kind: python_tool
+    name: Path 3 - description_structured_facets
+    description: Scores gallery descriptions against the generated query description using structured person facets.
+    callable_path: backend.tools.reid_specialists.retrieve_gallery_by_description_facets
+    inputs:
+      query_description: query_llm_description
+      gallery_description_db_path: gallery_description_db_path
+      top_k: retrieval_top_k
+    output_state_key: description_facets_ranked
+
+  - id: description_semantic_embedding
+    kind: embedding
+    name: Path 2 - description_semantic_text query encoder
+    description: Embeds the generated natural-language person description for description retrieval.
+    provider: openrouter
+    model: google/gemini-embedding-2-preview
+    input_state_key: query_llm_description
+    output_state_key: query_description_embedding
+
+  - id: description_semantic_retriever
+    kind: vector_retriever
+    name: Path 2 - description_semantic_text gallery retrieval
+    description: Retrieves top-k gallery rows by text-embedding similarity over offline gallery descriptions.
+    index_path: "{gallery_description_db_path}"
+    query_embedding_state_key: query_description_embedding
+    output_state_key: description_semantic_ranked
+    top_k: 200
+
+  - id: adaptive_fusion_weight_router
+    kind: python_tool
+    name: Decide adaptive ReID fusion weights
+    description: Chooses visual-heavy or description-heavy RRF weights from rank agreement.
+    callable_path: backend.tools.reid_specialists.decide_reid_fusion_weights
+    inputs:
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+    output_state_key: fusion_weight_analysis
+
+  - id: weighted_reciprocal_rank_fusion
+    kind: python_tool
+    name: Fuse Torchreid visual + description retrieval paths
+    description: Combines Torchreid visual, semantic description, and structured facet rankings with weighted RRF.
+    callable_path: backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
+    inputs:
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+      fusion_weight_analysis: fusion_weight_analysis
+    output_state_key: ranked_gallery_ids
+
+edges:
+  - from: start
+    to: torchreid_visual_lookup
+  - from: start
+    to: llm_description_parser
+  - from: llm_description_parser
+    to: description_facets_retriever
+  - from: llm_description_parser
+    to: description_semantic_embedding
+  - from: description_semantic_embedding
+    to: description_semantic_retriever
+  - from: torchreid_visual_lookup
+    to: adaptive_fusion_weight_router
+  - from: description_semantic_retriever
+    to: adaptive_fusion_weight_router
+  - from: description_facets_retriever
+    to: adaptive_fusion_weight_router
+  - from: adaptive_fusion_weight_router
+    to: weighted_reciprocal_rank_fusion
+  - from: weighted_reciprocal_rank_fusion
+    to: __end__

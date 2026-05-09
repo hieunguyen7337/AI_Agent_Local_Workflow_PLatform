@@ -1,0 +1,104 @@
+schema_version: workflow.graph/v1
+name: person_reid_market1501_fastreid_fusion_eval
+description: >-
+  Eval-friendly Market-1501 person ReID pipeline that replaces the generic
+  visual embedding path with precomputed FastReID SBS R101-IBN rankings while
+  keeping the existing description semantic and structured facet retrieval paths.
+category: agentic
+tags:
+  - person-reid
+  - fastreid
+  - multimodal
+  - retrieval
+  - market1501
+  - eval
+budget:
+  cost_usd: 0.10
+  latency_ms: 120000
+entry: start
+nodes:
+  - id: start
+    kind: python_tool
+    name: Mark workflow start
+    description: Marks the explicit workflow start node without reading databases, ranking candidates, or changing user state.
+    callable_path: backend.tools.reid_specialists.mark_workflow_start
+    inputs:
+      user_input: user_input
+    output_state_key: start_marker
+
+  - id: fastreid_visual_lookup
+    kind: python_tool
+    name: Path 1 - FastReID visual ReID precomputed ranking lookup
+    description: Reads top-k gallery IDs for the FastReID SBS R101-IBN visual ReID channel.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_visual_image_embedding
+      top_k: retrieval_score_top_k
+    output_state_key: reid_multimodal_embedding_ranked
+
+  - id: description_embedding_lookup
+    kind: python_tool
+    name: Path 2 - description_semantic_text precomputed ranking lookup
+    description: Reads top-k gallery IDs for the retained description semantic text channel.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_description_semantic_text
+      top_k: retrieval_score_top_k
+    output_state_key: description_semantic_ranked
+
+  - id: description_lookup
+    kind: python_tool
+    name: Path 3 - description_structured_facets precomputed ranking lookup
+    description: Reads top-k gallery IDs for the retained structured facet channel.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_description_structured_facets
+      top_k: retrieval_score_top_k
+    output_state_key: description_facets_ranked
+
+  - id: adaptive_fusion_weight_router
+    kind: python_tool
+    name: Decide adaptive ReID fusion weights
+    description: Chooses visual-heavy or description-heavy RRF weights from rank agreement.
+    callable_path: backend.tools.reid_specialists.decide_reid_fusion_weights
+    inputs:
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+    output_state_key: fusion_weight_analysis
+
+  - id: weighted_reciprocal_rank_fusion
+    kind: python_tool
+    name: Fuse FastReID visual + description retrieval paths
+    description: Combines FastReID visual, semantic description, and structured facet rankings with weighted RRF.
+    callable_path: backend.tools.reid_specialists.weighted_reciprocal_rank_fusion
+    inputs:
+      reid_multimodal_embedding_ranked: reid_multimodal_embedding_ranked
+      description_semantic_ranked: description_semantic_ranked
+      description_facets_ranked: description_facets_ranked
+      fusion_weight_analysis: fusion_weight_analysis
+    output_state_key: ranked_gallery_ids
+
+edges:
+  - from: start
+    to: fastreid_visual_lookup
+  - from: start
+    to: description_embedding_lookup
+  - from: start
+    to: description_lookup
+  - from: fastreid_visual_lookup
+    to: adaptive_fusion_weight_router
+  - from: description_embedding_lookup
+    to: adaptive_fusion_weight_router
+  - from: description_lookup
+    to: adaptive_fusion_weight_router
+  - from: adaptive_fusion_weight_router
+    to: weighted_reciprocal_rank_fusion
+  - from: weighted_reciprocal_rank_fusion
+    to: __end__

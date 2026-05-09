@@ -1,0 +1,46 @@
+schema_version: workflow.graph/v1
+name: person_reid_market1501_fastreid_eval
+description: >-
+  Visual-only Market-1501 person ReID eval using precomputed FastReID SBS
+  R101-IBN rankings. The workflow performs no model inference at runtime; it
+  only looks up top-k gallery IDs from the precomputed retrieval_rankings DB.
+category: agentic
+tags:
+  - person-reid
+  - fastreid
+  - retrieval
+  - market1501
+  - eval
+budget:
+  cost_usd: 0.05
+  latency_ms: 60000
+entry: start
+nodes:
+  - id: start
+    kind: python_tool
+    name: Mark workflow start
+    description: Marks the explicit workflow start node without reading databases, ranking candidates, or changing user state.
+    callable_path: backend.tools.reid_specialists.mark_workflow_start
+    inputs:
+      user_input: user_input
+    output_state_key: start_marker
+
+  - id: fastreid_visual_lookup
+    kind: python_tool
+    name: FastReID visual ReID precomputed ranking lookup
+    description: >-
+      Reads top-k gallery IDs for the FastReID SBS R101-IBN visual ReID channel
+      from the precomputed retrieval_rankings DB.
+    callable_path: backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking
+    inputs:
+      query_id: user_input
+      retrieval_score_db_path: retrieval_score_db_path
+      channel: channel_visual_image_embedding
+      top_k: retrieval_score_top_k
+    output_state_key: ranked_gallery_ids
+
+edges:
+  - from: start
+    to: fastreid_visual_lookup
+  - from: fastreid_visual_lookup
+    to: __end__

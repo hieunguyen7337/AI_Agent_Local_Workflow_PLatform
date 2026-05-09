@@ -845,6 +845,65 @@ def test_person_reid_eval_workflow_spec_loads():
     }
 
 
+def test_person_reid_reid_eval_workflow_variants_load():
+    from backend.graphspec import load_graph_spec
+
+    for workflow_id, lookup_id in (
+        ("person_reid_market1501_torchreid_eval", "torchreid_visual_lookup"),
+        ("person_reid_market1501_fastreid_eval", "fastreid_visual_lookup"),
+    ):
+        spec = load_graph_spec(workflow_id)
+        node_kinds = {n.id: n.kind for n in spec.nodes}
+        assert all(kind != "embedding" for kind in node_kinds.values())
+        assert all(kind != "vector_retriever" for kind in node_kinds.values())
+        assert node_kinds["start"] == "python_tool"
+        assert node_kinds[lookup_id] == "python_tool"
+        lookup = next(n for n in spec.nodes if n.id == lookup_id)
+        assert lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
+        assert lookup.inputs["channel"] == "channel_visual_image_embedding"
+        assert lookup.output_state_key == "ranked_gallery_ids"
+
+
+def test_person_reid_reid_fusion_eval_workflow_variants_load():
+    from backend.graphspec import load_graph_spec
+
+    for workflow_id, lookup_id in (
+        ("person_reid_market1501_torchreid_fusion_eval", "torchreid_visual_lookup"),
+        ("person_reid_market1501_fastreid_fusion_eval", "fastreid_visual_lookup"),
+    ):
+        spec = load_graph_spec(workflow_id)
+        node_kinds = {n.id: n.kind for n in spec.nodes}
+        assert all(kind != "embedding" for kind in node_kinds.values())
+        assert all(kind != "vector_retriever" for kind in node_kinds.values())
+        assert node_kinds[lookup_id] == "python_tool"
+        assert node_kinds["description_embedding_lookup"] == "python_tool"
+        assert node_kinds["description_lookup"] == "python_tool"
+        assert node_kinds["weighted_reciprocal_rank_fusion"] == "python_tool"
+        lookup = next(n for n in spec.nodes if n.id == lookup_id)
+        assert lookup.inputs["channel"] == "channel_visual_image_embedding"
+        rrf = next(n for n in spec.nodes if n.id == "weighted_reciprocal_rank_fusion")
+        assert rrf.output_state_key == "ranked_gallery_ids"
+
+
+def test_person_reid_reid_normal_workflow_variants_replace_visual_embedding():
+    from backend.graphspec import load_graph_spec
+
+    for workflow_id, lookup_id in (
+        ("person_reid_market1501_torchreid", "torchreid_visual_lookup"),
+        ("person_reid_market1501_fastreid", "fastreid_visual_lookup"),
+    ):
+        spec = load_graph_spec(workflow_id)
+        node_kinds = {n.id: n.kind for n in spec.nodes}
+        assert "reid_multimodal_embedding" not in node_kinds
+        assert "reid_multimodal_embedding_retriever" not in node_kinds
+        assert node_kinds[lookup_id] == "python_tool"
+        assert node_kinds["llm_description_parser"] == "llm"
+        assert node_kinds["description_semantic_embedding"] == "embedding"
+        lookup = next(n for n in spec.nodes if n.id == lookup_id)
+        assert lookup.callable_path == "backend.tools.reid_specialists.lookup_precomputed_retrieval_ranking"
+        assert lookup.output_state_key == "reid_multimodal_embedding_ranked"
+
+
 def test_person_reid_llm_prompts_with_literal_json_format_cleanly():
     from backend.graphspec import load_graph_spec
 
