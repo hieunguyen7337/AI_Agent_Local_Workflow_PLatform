@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from backend.repo_root import resolve_dataset_path_str
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 _RRF_K = 60
+_THREAD_LOCAL = threading.local()
 
 # Description schema (kept in sync with build_description_dbs.FACET_KEYS).
 DESCRIPTION_FACET_KEYS: tuple[str, ...] = (
@@ -123,6 +125,24 @@ def _resolve_tool_db_path(path_str: str) -> Path:
     return Path(resolve_dataset_path_str(path_str))
 
 
+def _readonly_sqlite_connection(db_path: Path) -> sqlite3.Connection:
+    """Return a per-thread read-only SQLite connection for hot eval lookups."""
+    stat = db_path.stat()
+    cache_key = (db_path.resolve().as_posix(), stat.st_mtime_ns, stat.st_size)
+    cache = getattr(_THREAD_LOCAL, "sqlite_connections", None)
+    if cache is None:
+        cache = {}
+        _THREAD_LOCAL.sqlite_connections = cache
+
+    con = cache.get(cache_key)
+    if con is None:
+        uri = f"file:{db_path.resolve().as_posix()}?mode=ro&immutable=1"
+        con = sqlite3.connect(uri, uri=True)
+        con.execute("PRAGMA query_only = ON")
+        cache[cache_key] = con
+    return con
+
+
 def lookup_query_description_from_eval_db(
     query_id: str,
     query_description_db_path: str,
@@ -214,17 +234,17 @@ def lookup_precomputed_retrieval_ranking(
     db_path = _resolve_tool_db_path(retrieval_score_db_path)
     if not db_path.is_file():
         raise FileNotFoundError(f"retrieval score database not found: {retrieval_score_db_path}")
-    with sqlite3.connect(db_path) as con:
-        rows = con.execute(
-            """
-            SELECT gallery_id
-            FROM retrieval_rankings
-            WHERE query_id = ? AND channel = ?
-            ORDER BY rank
-            LIMIT ?
-            """,
-            (query_id, channel, int(top_k)),
-        ).fetchall()
+    con = _readonly_sqlite_connection(db_path)
+    rows = con.execute(
+        """
+        SELECT gallery_id
+        FROM retrieval_rankings
+        WHERE query_id = ? AND channel = ?
+        ORDER BY rank
+        LIMIT ?
+        """,
+        (query_id, channel, int(top_k)),
+    ).fetchall()
     if not rows:
         raise KeyError(f"query_id {query_id!r} channel {channel!r} not found in {retrieval_score_db_path}")
     return [str(row[0]) for row in rows]
