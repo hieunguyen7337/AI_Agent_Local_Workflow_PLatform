@@ -8,7 +8,7 @@ from pathlib import Path
 
 from backend.providers import openai as oai
 from backend.providers import openrouter as orouter
-from backend.providers.base import LLMResponse, Usage
+from backend.providers.base import EmbeddingResponse, LLMResponse, Usage
 from backend.runtime import WorkflowBatchItem, WorkflowFunctionResult, run_workflow_batch, run_workflow_function
 from backend.runtime.artifacts import resolve_run_dir
 
@@ -31,7 +31,16 @@ def test_run_workflow_function_accepts_string_user_input(monkeypatch, tmp_path: 
         return LLMResponse(text="query", usage=Usage(1, 1), model="gpt-4o-mini")
 
     monkeypatch.setattr(oai, "stream_openai", _reply)
+    monkeypatch.setattr(
+        "backend.runtime.nodes.embedding.call_embedding_provider",
+        lambda *args, **kwargs: EmbeddingResponse(
+            embedding=[1.0] + [0.0] * 767,
+            usage=Usage(1, 0),
+            model=kwargs["model"],
+        ),
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     result = run_workflow_function(
         "linear_rag",
@@ -110,7 +119,16 @@ def test_run_workflow_function_executes_subgraph(monkeypatch, tmp_path: Path):
         LLMResponse(text="Refunds are available within 30 days.", usage=Usage(1, 1), model="gpt-4o-mini"),
     ]
     monkeypatch.setattr(oai, "stream_openai", _Replies(replies))
+    monkeypatch.setattr(
+        "backend.runtime.nodes.embedding.call_embedding_provider",
+        lambda *args, **kwargs: EmbeddingResponse(
+            embedding=[1.0] + [0.0] * 767,
+            usage=Usage(1, 0),
+            model=kwargs["model"],
+        ),
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
     runs_root = tmp_path / "runs"
 
     result = run_workflow_function(

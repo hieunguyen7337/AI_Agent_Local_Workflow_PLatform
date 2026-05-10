@@ -15,7 +15,7 @@ from backend.server import routes
 from backend.server.app import app
 from backend.runtime.artifacts import resolve_run_dir, run_dir_for_id
 from backend.telemetry.exporter import ensure_schema
-from backend.providers.base import LLMResponse, Usage
+from backend.providers.base import EmbeddingResponse, LLMResponse, Usage
 from backend.graphspec import graph_spec_to_metadata, load_graph_spec
 from backend.runtime.executor import run_graph
 
@@ -815,7 +815,16 @@ def test_run_detail_includes_subgraph_parent_child_lineage(monkeypatch, tmp_path
         return replies.pop(0)
 
     monkeypatch.setattr("backend.providers.openai.stream_openai", _fake_openai)
+    monkeypatch.setattr(
+        "backend.runtime.nodes.embedding.call_embedding_provider",
+        lambda *args, **kwargs: EmbeddingResponse(
+            embedding=[1.0] + [0.0] * 767,
+            usage=Usage(1, 0),
+            model=kwargs["model"],
+        ),
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     metadata = graph_spec_to_metadata(load_graph_spec("rag_subgraph_wrapper"))
     result = run_graph(metadata, user_input="What is the refund window?", runs_root=runs_root)

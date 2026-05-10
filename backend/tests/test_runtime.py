@@ -20,7 +20,7 @@ from backend.builder.api import (
 )
 from backend.providers import openai as oai
 from backend.providers import openrouter as orouter
-from backend.providers.base import LLMResponse, Usage
+from backend.providers.base import EmbeddingResponse, LLMResponse, Usage
 from backend.graphspec import graph_spec_to_metadata, load_graph_spec
 from backend.runtime.cancellation import CancellationController
 from backend.runtime.executor import run_graph
@@ -341,7 +341,16 @@ def test_subgraph_node_executes_child_run_and_writes_lineage(monkeypatch, tmp_ru
         LLMResponse(text="grounded answer", usage=Usage(10, 5), model="gpt-4o-mini"),
     ]
     monkeypatch.setattr(oai, "stream_openai", _Replies(replies))
+    monkeypatch.setattr(
+        "backend.runtime.nodes.embedding.call_embedding_provider",
+        lambda *args, **kwargs: EmbeddingResponse(
+            embedding=[1.0] + [0.0] * 767,
+            usage=Usage(1, 0),
+            model=kwargs["model"],
+        ),
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
     metadata = graph_spec_to_metadata(load_graph_spec("rag_subgraph_wrapper"))
     result = run_graph(metadata, user_input="What is in the corpus?", runs_root=tmp_runs_root)
