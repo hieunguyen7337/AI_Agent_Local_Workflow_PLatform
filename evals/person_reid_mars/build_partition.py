@@ -16,8 +16,14 @@ import argparse
 import json
 import random
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
+
+# Allow `python evals/.../build_partition.py` without installing the package.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import yaml
 from scipy.io import loadmat
