@@ -16,13 +16,16 @@ dataset/
 |   |-- query/                3,368 jpg files
 |   `-- readme.txt
 `-- mars/
-    |-- MARS.torrent
-    `-- info/
-        |-- query_IDX.mat
-        |-- test_name.txt
-        |-- tracks_test_info.mat
-        |-- tracks_train_info.mat
-        `-- train_name.txt
+    |-- archives/            # optional: keep bbox_train.zip / bbox_test.zip here after extraction
+    |-- bbox_train/          # extracted training tracklets (per-identity subfolders)
+    |-- bbox_test/           # extracted test tracklets (per-identity subfolders)
+    |-- info/                # from MARS-evaluation (lists + .mat)
+    |   |-- query_IDX.mat
+    |   |-- test_name.txt
+    |   |-- tracks_test_info.mat
+    |   |-- tracks_train_info.mat
+    |   `-- train_name.txt
+    `-- MARS.torrent         # optional: torrent metadata only
 ```
 
 The local `readme.txt` describes Market-1501 as a six-camera person re-identification dataset collected at Tsinghua University, with 1,501 annotated identities, 751 training identities, 750 testing identities, and 3,368 query images. It also states the dataset is for research use only and should not be redistributed or used commercially.
@@ -66,6 +69,7 @@ The intended local repo layout after download and extraction is:
 ```text
 dataset/
 `-- mars/
+    |-- archives/            # optional: original zips
     |-- bbox_train/
     |-- bbox_test/
     `-- info/
@@ -73,12 +77,10 @@ dataset/
 
 `info/` should come from `liangzheng06/MARS-evaluation/info` and includes split metadata such as `train_name.txt`, `test_name.txt`, `tracks_train_info.mat`, `tracks_test_info.mat`, and `query_IDX.mat`.
 
-Command-line download notes:
+Manual acquisition notes:
 
-- The official SharePoint link currently redirects to browser-authenticated OneDrive and returns HTTP 403 from non-browser `curl`/`wget`.
-- The official Baidu link may require Baidu web/session tooling and can time out from headless environments.
-- As a fallback, the community HyperAI listing exposes a torrent for the same 6.26GB package: <https://hyper.ai/cn/datasets/16683>. The torrent metadata has been downloaded locally to `dataset/mars/MARS.torrent`; payload download still depends on reachable peers/trackers from the local network.
-- The official evaluation metadata has been downloaded locally to `dataset/mars/info/` from <https://github.com/liangzheng06/MARS-evaluation/tree/master/info>.
+- Obtain the **official** MARS package and extract it under `dataset/mars/` so `bbox_train/` and `bbox_test/` exist (see layout above). The official SharePoint link usually requires a **browser** session; the Baidu link needs Baidu’s own tooling. This repository does **not** automate downloads.
+- Copy evaluation metadata from [MARS-evaluation `info/`](https://github.com/liangzheng06/MARS-evaluation/tree/master/info) into `dataset/mars/info/` (same filenames as in the tree above).
 
 ## Repo Usage
 
