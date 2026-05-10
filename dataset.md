@@ -100,6 +100,7 @@ Current related repo paths:
 - `evals/person_reid_market1501/build_dataset.py`
 - `evals/person_reid_market1501/build_partition.py`
 - `evals/person_reid_market1501/build_description_dbs.py`
+- `evals/person_reid_mars/build_partition.py` (MARS tracklet partition; requires SciPy for `.mat` metadata)
 
 Generated eval inputs and databases are intentionally ignored, including `evals/person_reid_market1501/dataset.yaml`, `gallery_index/`, `gallery_db/`, `embedding_db/`, `description_db/`, and partition folders.
 

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local-first platform to author, run, visualize, and iterate on AI workflows."
 requires-python = ">=3.11"
 dependencies = [
+    "scipy>=1.11",
     "langgraph>=0.2.50",
     "langgraph-checkpoint-sqlite>=2.0.0",
     "pydantic>=2.6",
